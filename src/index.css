@@ -1,0 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100;300;400;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --onyx-bg: #000000;
+  --onyx-purple: #C084FC;
+  --onyx-purple-glow: rgba(192, 132, 252, 0.25);
+  --onyx-text: #FFFFFF;
+  --onyx-muted: #71717A;
+}
+
+@layer base {
+  body {
+    background-color: var(--onyx-bg);
+    color: var(--onyx-text);
+    font-family: 'Outfit', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
