@@ -70,15 +70,20 @@ export default function App() {
     let selectedNodes = [];
 
     function syncMarkers(gMap) {
+      console.log("%cONYX SYSTEM: Syncing Lattice Nodes...", "color: #C084FC; font-weight: bold;");
       markers.forEach(m => m.setMap(null));
       emergencyMarkers.forEach(m => m.setMap(null));
       markers = [];
       emergencyMarkers = [];
 
-      const savedLocations = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
+      const rawData = localStorage.getItem('onyx_itinerary_locations');
+      const savedLocations = JSON.parse(rawData || '[]');
       setItinerary(savedLocations);
+      
       const geocoder = new window.google.maps.Geocoder();
       const directionsService = new window.google.maps.DirectionsService();
+
+      console.log(`ONYX SYSTEM: Found ${savedLocations.length} locations in storage.`);
 
       // Render Emergency Nodes
       EMERGENCY_NODES.forEach(node => {
@@ -104,32 +109,46 @@ export default function App() {
       // Render Itinerary Nodes
       savedLocations.forEach((loc) => {
         if (activeFilter === "All" || activeFilter === loc.category) {
-          geocoder.geocode({ address: `${loc.city}, Japan` }, (results, status) => {
-            if (status === 'OK') {
-              const pos = results[0].geometry.location;
-              const marker = new window.google.maps.Marker({
-                position: pos,
-                map: gMap,
-                title: loc.city,
-                icon: {
-                  path: window.google.maps.SymbolPath.CIRCLE,
-                  fillColor: '#C084FC',
-                  fillOpacity: 1,
-                  strokeColor: '#FFFFFF',
-                  strokeWeight: 2,
-                  scale: 6,
-                }
-              });
-
-              marker.addListener('click', () => handleNodeSelection(gMap, directionsService, pos, loc, marker));
-              markers.push(marker);
-            }
-          });
+          // If the location already has coords, use them. Otherwise geocode.
+          if (loc.lat && loc.lng) {
+             const pos = { lat: loc.lat, lng: loc.lng };
+             createMarker(gMap, pos, loc, directionsService);
+          } else {
+            console.log(`ONYX SYSTEM: Geocoding node -> ${loc.city}`);
+            geocoder.geocode({ address: `${loc.city}, Japan` }, (results, status) => {
+              if (status === 'OK') {
+                const pos = results[0].geometry.location;
+                createMarker(gMap, pos, loc, directionsService);
+              } else {
+                console.warn(`ONYX SYSTEM: Geocode failed for ${loc.city} -> Status: ${status}`);
+              }
+            });
+          }
         }
       });
     }
 
+    function createMarker(gMap, pos, loc, service) {
+      const marker = new window.google.maps.Marker({
+        position: pos,
+        map: gMap,
+        title: loc.city,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          fillColor: '#C084FC',
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 2,
+          scale: 6,
+        }
+      });
+
+      marker.addListener('click', () => handleNodeSelection(gMap, service, pos, loc, marker));
+      markers.push(marker);
+    }
+
     function handleNodeSelection(gMap, service, pos, loc, marker) {
+      console.log(`ONYX SYSTEM: Selecting node -> ${loc.city}`);
       setSelectedLocation({ ...loc, pos });
       
       if (selectedNodes.length >= 2) {
@@ -173,6 +192,7 @@ export default function App() {
         if (status === 'OK') {
           renderOnyxRoute(gMap, result, locData, destination, origin);
         } else {
+          console.warn("ONYX SYSTEM: Transit failed, falling back to walking.");
           service.route({
             origin: origin,
             destination: destination,
@@ -236,7 +256,7 @@ export default function App() {
       };
 
       setNextStop({
-        name: locData.city.toUpperCase() || locData.name.toUpperCase(),
+        name: (locData.city || locData.name || "TARGET").toUpperCase(),
         distance: route.distance.text,
         eta: route.duration.text,
         step: route.steps[0].instructions.replace(/<[^>]*>?/gm, '')
@@ -262,10 +282,21 @@ export default function App() {
         setMap(gMap);
         syncMarkers(gMap);
 
+        // Polling Sync (Ensures nodes update even if storage event misses)
+        let lastData = localStorage.getItem('onyx_itinerary_locations');
+        const pollInterval = setInterval(() => {
+          const currentData = localStorage.getItem('onyx_itinerary_locations');
+          if (currentData !== lastData) {
+            console.log("ONYX SYSTEM: Data change detected via polling.");
+            lastData = currentData;
+            syncMarkers(gMap);
+          }
+        }, 3000);
+
         // Autocomplete Setup
         const autocomplete = new window.google.maps.places.Autocomplete(searchInputRef.current, {
           componentRestrictions: { country: "jp" },
-          fields: ["address_components", "geometry", "name", "formatted_address"]
+          fields: ["geometry", "name", "formatted_address"]
         });
 
         autocomplete.addListener("place_changed", () => {
