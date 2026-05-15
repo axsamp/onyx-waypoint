@@ -377,6 +377,12 @@ export default function App() {
   const zoomIn = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() + 1);
   const zoomOut = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() - 1);
 
+  const openInExternalMaps = () => {
+    if (!selectedLocation) return;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${selectedLocation.pos.lat()},${selectedLocation.pos.lng()}&travelmode=transit`;
+    window.open(url, '_blank');
+  };
+
   const addToLattice = () => {
     if (!selectedLocation) return;
     const current = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
@@ -489,7 +495,10 @@ export default function App() {
               <span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span>
             </div>
           </div>
-          <button className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0">
+          <button 
+            onClick={openInExternalMaps}
+            className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0"
+          >
             <ArrowUpRight className="w-5 h-5" />
           </button>
         </div>
