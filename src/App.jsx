@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Navigation, Compass, Search, X, Home, Plus, CheckCircle2, Zap, ArrowUpRight,
-  Maximize, Minimize, Map as MapIcon, Star, Camera, Activity, Target, Trash2
+  Maximize, Minimize, Map as MapIcon, Star, Camera, Activity, Target, Trash2, Info
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -14,7 +14,7 @@ function cn(...inputs) {
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
-// THE EXACT COORDINATES FOR FUJISAWA STATION ICON ON GOOGLE MAPS
+// ABSOLUTE JR FUJISAWA STATION COORDINATES (Verified via Google Maps URL params)
 const ONYX_STATION_COORDS = { lat: 35.3389164, lng: 139.4874922, name: "FUJISAWA STATION" };
 
 const EMERGENCY_NODES = [
@@ -44,8 +44,8 @@ export default function App() {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
+  const [systemLog, setSystemLog] = useState("ONYX SYSTEMS ONLINE...");
   
-  // Home Base - Default to Fujisawa Station, but respect user overrides
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
     return saved ? JSON.parse(saved) : ONYX_STATION_COORDS;
@@ -65,15 +65,23 @@ export default function App() {
     return JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
   });
 
+  const log = (msg) => {
+    console.log(`[ONYX] ${msg}`);
+    setSystemLog(msg.toUpperCase());
+  };
+
   useEffect(() => {
     if (homeBase) {
       localStorage.setItem('onyx_waypoint_home', JSON.stringify(homeBase));
+      log(`HOME BASE SET: ${homeBase.name}`);
     } else {
       localStorage.removeItem('onyx_waypoint_home');
+      log("HOME BASE CLEARED");
     }
-    // Update Home Marker position
+    
     if (homeMarkerRef.current && homeBase) {
-      homeMarkerRef.current.setPosition(new window.google.maps.LatLng(homeBase.lat, homeBase.lng));
+      const pos = new window.google.maps.LatLng(homeBase.lat, homeBase.lng);
+      homeMarkerRef.current.setPosition(pos);
       homeMarkerRef.current.setVisible(true);
     } else if (homeMarkerRef.current) {
       homeMarkerRef.current.setVisible(false);
@@ -89,8 +97,10 @@ export default function App() {
       if (showTraffic) {
         if (!trafficLayerRef.current) trafficLayerRef.current = new window.google.maps.TrafficLayer();
         trafficLayerRef.current.setMap(mapInstance.current);
+        log("TRAFFIC LAYER ACTIVE");
       } else if (trafficLayerRef.current) {
         trafficLayerRef.current.setMap(null);
+        log("TRAFFIC LAYER INACTIVE");
       }
     }
   }, [showTraffic]);
@@ -103,6 +113,7 @@ export default function App() {
       script.defer = true;
       window.initMap = initMap;
       document.head.appendChild(script);
+      log("LOADING GOOGLE CORE...");
     } else {
       initMap();
     }
@@ -111,6 +122,7 @@ export default function App() {
       const currentData = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
       if (JSON.stringify(currentData) !== JSON.stringify(itinerary)) {
         setItinerary(currentData);
+        log("LATTICE SYNC COMPLETE");
       }
     }, 3000);
 
@@ -126,7 +138,7 @@ export default function App() {
       const centerPos = homeBase || ONYX_STATION_COORDS;
       const gMap = new window.google.maps.Map(mapRef.current, {
         center: centerPos,
-        zoom: 16,
+        zoom: 17, // Tighter initial zoom
         styles: obsidianStyle,
         disableDefaultUI: true,
         backgroundColor: '#000000',
@@ -144,17 +156,18 @@ export default function App() {
           fillColor: '#FFFFFF',
           fillOpacity: 1,
           strokeColor: '#C084FC',
-          strokeWeight: 2,
-          scale: 8,
+          strokeWeight: 3,
+          scale: 10,
         },
-        zIndex: 999,
+        zIndex: 9999,
         visible: !!homeBase
       });
 
       homeMarkerRef.current.addListener('click', () => {
         if (!homeBase) return;
+        log(`SELECTED HOME BASE: ${homeBase.name}`);
         const latLng = new window.google.maps.LatLng(homeBase.lat, homeBase.lng);
-        handleNodeSelection(gMap, latLng, { city: homeBase.name || "HOME BASE", description: "Pinned Location", category: "Home" }, homeMarkerRef.current);
+        handleNodeSelection(gMap, latLng, { city: homeBase.name || "HOME BASE", description: "Pinned Control Point", category: "Home" }, homeMarkerRef.current);
       });
 
       syncMarkers(gMap);
@@ -167,20 +180,26 @@ export default function App() {
       autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace();
         if (!place.geometry || !place.geometry.location) return;
+        log(`SEARCH HIT: ${place.name}`);
         setIsSearchExpanded(false);
         fetchRichData(gMap, place.place_id, place.geometry.location, { city: place.name, description: place.formatted_address, category: "Urban" });
       });
 
       gMap.addListener('click', (e) => {
+        log(`MAP CLICK AT: ${e.latLng.lat().toFixed(4)}, ${e.latLng.lng().toFixed(4)}`);
         if (e.placeId) {
+          log(`INTERCEPTED PLACE ID: ${e.placeId}`);
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
         } else {
+          log("SCANNING FOR NEARBY POI...");
           const service = new window.google.maps.places.PlacesService(gMap);
-          service.nearbySearch({ location: e.latLng, radius: 50, type: ['point_of_interest'] }, (results, status) => {
+          service.nearbySearch({ location: e.latLng, radius: 40, type: ['point_of_interest'] }, (results, status) => {
             if (status === 'OK' && results[0]) {
+              log(`SNAPPING TO POI: ${results[0].name}`);
               fetchRichData(gMap, results[0].place_id, results[0].geometry.location, null);
             } else {
+              log("REVERSE GEOCODING LOCATION...");
               const geocoder = new window.google.maps.Geocoder();
               geocoder.geocode({ location: e.latLng }, (results, status) => {
                 if (status === 'OK' && results[0]) {
@@ -192,28 +211,34 @@ export default function App() {
           });
         }
       });
+      log("MAP INITIALIZED");
     } catch (err) {
-      console.error("ONYX SYSTEM: Map Initialization Error", err);
+      log(`MAP ERROR: ${err.message}`);
     }
   }
 
   function fetchRichData(gMap, placeId, pos, basicData) {
+    log(`FETCHING RICH DATA FOR ID: ${placeId}`);
     const service = new window.google.maps.places.PlacesService(gMap);
     service.getDetails({ 
       placeId: placeId,
       fields: ["name", "rating", "photos", "formatted_address", "types", "geometry"]
     }, (place, status) => {
-      if (status === 'OK') {
+      if (status === 'OK' && place) {
+        log(`DATA RETRIEVED: ${place.name}`);
         const loc = { 
           city: place.name, 
           description: place.formatted_address, 
-          category: place.types?.[0]?.charAt(0).toUpperCase() + place.types?.[0]?.slice(1) || "Point",
+          category: place.types?.[0]?.replace(/_/g, ' ').toUpperCase() || "POI",
           rating: place.rating, 
-          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 800 }) : null 
+          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 1000 }) : null 
         };
         handleNodeSelection(gMap, place.geometry.location, loc, null);
-      } else if (basicData) {
-        handleNodeSelection(gMap, pos, basicData, null);
+      } else {
+        log(`RICH DATA FAIL: ${status}`);
+        if (basicData || pos) {
+          handleNodeSelection(gMap, pos, basicData || { city: "POINT", description: "Unknown Location", category: "Map" }, null);
+        }
       }
     });
   }
@@ -237,10 +262,11 @@ export default function App() {
             fillOpacity: 0.8,
             strokeColor: '#FFFFFF',
             strokeWeight: 1,
-            scale: 3,
+            scale: 4,
           }
         });
         marker.addListener('click', () => {
+          log(`SELECTED EMERGENCY: ${node.city}`);
           const latLng = new window.google.maps.LatLng(node.lat, node.lng);
           handleNodeSelection(gMap, latLng, node, marker);
         });
@@ -273,10 +299,13 @@ export default function App() {
         fillOpacity: 1,
         strokeColor: '#FFFFFF',
         strokeWeight: 1.5,
-        scale: 5,
+        scale: 6,
       }
     });
-    marker.addListener('click', () => handleNodeSelection(gMap, pos, loc, marker));
+    marker.addListener('click', () => {
+      log(`SELECTED LATTICE NODE: ${loc.city}`);
+      handleNodeSelection(gMap, pos, loc, marker);
+    });
     markersRef.current.push(marker);
   }
 
@@ -290,7 +319,7 @@ export default function App() {
       fillOpacity: 1,
       strokeColor: '#FFFFFF',
       strokeWeight: 1.5,
-      scale: 5,
+      scale: 6,
     }));
     selectedNodesRef.current = [];
     if (currentRouteRef.current) currentRouteRef.current.setMap(null);
@@ -304,7 +333,7 @@ export default function App() {
         fillOpacity: 1,
         strokeColor: '#C084FC',
         strokeWeight: 2,
-        scale: 7,
+        scale: 8,
       });
     }
 
@@ -315,7 +344,7 @@ export default function App() {
         name: (loc.city || loc.name || "TARGET").toUpperCase(),
         distance: "N/A",
         eta: "N/A",
-        step: "Set a Home Base to see routes.",
+        step: "Please set a Home Base to view travel intelligence.",
         rating: loc.rating || null,
         photo: loc.photo || null,
         transitLines: []
@@ -332,7 +361,7 @@ export default function App() {
 
     const dist = window.google.maps.geometry.spherical.computeDistanceBetween(originLatLng, destLatLng);
 
-    if (dist < 15) {
+    if (dist < 20) {
       setNextStop({
         name: (locData.city || locData.name || "HOME").toUpperCase(),
         distance: "0M",
@@ -347,6 +376,7 @@ export default function App() {
       return;
     }
 
+    log(`CALCULATING TRANSIT FROM HOME TO ${locData.city}...`);
     const service = new window.google.maps.DirectionsService();
     service.route({
       origin: originLatLng,
@@ -355,15 +385,20 @@ export default function App() {
       transitOptions: { departureTime: new Date() }
     }, (result, status) => {
       if (status === 'OK') {
+        log("TRANSIT ROUTE OPTIMIZED");
         renderOnyxRoute(gMap, result, locData, destLatLng, originLatLng);
       } else {
+        log(`TRANSIT FAIL (${status}). SWITCHING TO KINETIC...`);
         service.route({
           origin: originLatLng,
           destination: destLatLng,
           travelMode: window.google.maps.TravelMode.WALKING
         }, (walkResult, walkStatus) => {
           if (walkStatus === 'OK') {
+            log("KINETIC ROUTE OPTIMIZED");
             renderOnyxRoute(gMap, walkResult, locData, destLatLng, originLatLng);
+          } else {
+            log(`ROUTE FAILED: ${walkStatus}`);
           }
         });
       }
@@ -388,7 +423,7 @@ export default function App() {
       geodesic: true,
       strokeColor: '#C084FC',
       strokeOpacity: 0.15,
-      strokeWeight: 2,
+      strokeWeight: 3,
       map: gMap
     });
 
@@ -396,8 +431,8 @@ export default function App() {
       path: result.routes[0].overview_path,
       geodesic: true,
       strokeColor: '#C084FC',
-      strokeOpacity: 0.8,
-      strokeWeight: 1.5,
+      strokeOpacity: 1,
+      strokeWeight: 2,
       icons: [{
         icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeWeight: 2, scale: 2, strokeColor: '#FFFFFF' },
         offset: '0%',
@@ -436,9 +471,10 @@ export default function App() {
   const locateUser = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
+        log("GEOLOCATING DEVICE...");
         const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         mapInstance.current?.panTo(coords);
-        mapInstance.current?.setZoom(16);
+        mapInstance.current?.setZoom(17);
       });
     }
   };
@@ -450,6 +486,7 @@ export default function App() {
     if (!selectedLocation || !homeBase) return;
     const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${selectedLocation.pos.lat?.() || selectedLocation.pos.lat},${selectedLocation.pos.lng?.() || selectedLocation.pos.lng}&travelmode=transit`;
     window.open(url, '_blank');
+    log("HANDING OFF TO GOOGLE MAPS NATIVE");
   };
 
   const addToLattice = () => {
@@ -459,6 +496,7 @@ export default function App() {
     const updated = [...current, { city: selectedLocation.city, kanji: "", category: selectedLocation.category || "Urban", budget: 0, priority: 5, description: selectedLocation.description }];
     localStorage.setItem('onyx_itinerary_locations', JSON.stringify(updated));
     setItinerary(updated);
+    log(`NODE ADDED TO LATTICE: ${selectedLocation.city}`);
   };
 
   const updateHomeBase = () => {
@@ -469,22 +507,35 @@ export default function App() {
       name: selectedLocation.city.toUpperCase() 
     };
     setHomeBase(newHome);
+    log(`NEW HOME BASE PINNED: ${newHome.name}`);
   };
 
   const deleteHomeBase = () => {
     setHomeBase(null);
+    log("HOME BASE DELETED");
   };
 
   const resetToFujisawa = () => {
+    log("RESETTING TO FUJISAWA STATION...");
     setHomeBase(ONYX_STATION_COORDS);
-    mapInstance.current?.panTo(new window.google.maps.LatLng(ONYX_STATION_COORDS.lat, ONYX_STATION_COORDS.lng));
-    mapInstance.current?.setZoom(16);
+    const latLng = new window.google.maps.LatLng(ONYX_STATION_COORDS.lat, ONYX_STATION_COORDS.lng);
+    mapInstance.current?.panTo(latLng);
+    mapInstance.current?.setZoom(17);
+    handleNodeSelection(mapInstance.current, latLng, { city: "FUJISAWA STATION", description: "Primary Home Base", category: "Transit" }, homeMarkerRef.current);
   };
 
   const isLocationInLattice = selectedLocation && itinerary.find(l => l.city === selectedLocation.city);
 
   return (
     <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden">
+      
+      {/* ONYX SYSTEM LOG OVERLAY */}
+      <div className="fixed bottom-24 left-4 z-40 pointer-events-none">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} className="bg-black/40 backdrop-blur-md px-2 py-1 rounded border border-white/5">
+          <span className="text-[6px] font-black tracking-[0.3em] uppercase animate-pulse">{systemLog}</span>
+        </motion.div>
+      </div>
+
       <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
         <div className="flex justify-between items-start gap-3">
           <motion.div layout onClick={resetToFujisawa} className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-onyx-purple/50 transition-colors">
