@@ -43,7 +43,7 @@ export default function App() {
   
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
-    return saved ? JSON.parse(saved) : { lat: 35.3389, lng: 139.4894, name: "FUJISAWA STATION" };
+    return saved ? JSON.parse(saved) : { lat: 35.3372, lng: 139.4872, name: "FUJISAWA STATION" };
   });
   
   const [nextStop, setNextStop] = useState({
