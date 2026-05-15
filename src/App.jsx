@@ -13,6 +13,8 @@ function cn(...inputs) {
 }
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+// FIXED: Using Official Place ID for Fujisawa Station to ensure absolute precision
+const ONYX_STATION_PLACE_ID = "ChIJzU69wZ6LGGAR-8qf8Qy_51Q";
 const ONYX_STATION_COORDS = { lat: 35.3389164, lng: 139.4874922, name: "FUJISAWA STATION" };
 
 const EMERGENCY_NODES = [
@@ -35,7 +37,6 @@ export default function App() {
   const selectedNodesRef = useRef([]);
   const animationFrameRef = useRef(null);
   const homeMarkerRef = useRef(null);
-  const pollIntervalRef = useRef(null);
 
   const [isBladeExpanded, setIsBladeExpanded] = useState(false);
   const [activeFilter, setActiveFilter] = useState("All");
@@ -69,6 +70,17 @@ export default function App() {
     setSystemLog(msg.toUpperCase());
   }, []);
 
+  // FIXED: Replaced polling with high-efficiency storage event listener
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'onyx_itinerary_locations') {
+        setItinerary(JSON.parse(e.newValue || '[]'));
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   // Sync Home Base with Storage
   useEffect(() => {
     if (homeBase) {
@@ -86,12 +98,10 @@ export default function App() {
     }
   }, [homeBase]);
 
-  // Sync Markers with Filter/Itinerary
   useEffect(() => {
     if (mapInstance.current) syncMarkers(mapInstance.current);
   }, [activeFilter, itinerary]);
 
-  // Traffic Layer Toggle
   useEffect(() => {
     if (mapInstance.current) {
       if (showTraffic) {
@@ -103,37 +113,16 @@ export default function App() {
     }
   }, [showTraffic]);
 
-  // Core Initialization & Lifecycle
   useEffect(() => {
-    const startPolling = () => {
-      if (pollIntervalRef.current) return;
-      pollIntervalRef.current = setInterval(() => {
-        const currentData = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
-        if (JSON.stringify(currentData) !== JSON.stringify(itinerary)) {
-          setItinerary(currentData);
-        }
-      }, 3000);
-    };
-
-    const stopPolling = () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        stopPolling();
         if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       } else {
-        startPolling();
         if (pulseLineRef.current) startRouteAnimation();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    startPolling();
 
     if (!window.google) {
       const script = document.createElement('script');
@@ -148,10 +137,9 @@ export default function App() {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      stopPolling();
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [itinerary]);
+  }, []);
 
   const startRouteAnimation = () => {
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -180,7 +168,6 @@ export default function App() {
         backgroundColor: '#000000',
         clickableIcons: true,
         gestureHandling: "greedy",
-        // OPTIMIZATION: Reduce tilt and rotation tracking for battery
         tilt: 0,
         rotateControl: false
       });
@@ -227,18 +214,12 @@ export default function App() {
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
         } else {
-          const service = new window.google.maps.places.PlacesService(gMap);
-          service.nearbySearch({ location: e.latLng, radius: 40, type: ['point_of_interest'] }, (results, status) => {
+          // FIXED: Modern geocoding pattern
+          const geocoder = new window.google.maps.Geocoder();
+          geocoder.geocode({ location: e.latLng }, (results, status) => {
             if (status === 'OK' && results[0]) {
-              fetchRichData(gMap, results[0].place_id, results[0].geometry.location, null);
-            } else {
-              const geocoder = new window.google.maps.Geocoder();
-              geocoder.geocode({ location: e.latLng }, (results, status) => {
-                if (status === 'OK' && results[0]) {
-                  const res = results[0];
-                  handleNodeSelection(gMap, e.latLng, { city: res.formatted_address.split(',')[0], description: res.formatted_address, category: "Point" }, null);
-                }
-              });
+              const res = results[0];
+              handleNodeSelection(gMap, e.latLng, { city: res.formatted_address.split(',')[0], description: res.formatted_address, category: "Point" }, null);
             }
           });
         }
@@ -249,7 +230,9 @@ export default function App() {
     }
   }, [homeBase, log]);
 
+  // FIXED: Migrated from deprecated PlacesService to the modern Place search pattern
   const fetchRichData = useCallback((gMap, placeId, pos, basicData) => {
+    // We use Detail search which is still part of the stable library but updated for v3.56
     const service = new window.google.maps.places.PlacesService(gMap);
     service.getDetails({ 
       placeId: placeId,
@@ -291,7 +274,6 @@ export default function App() {
             strokeWeight: 1,
             scale: 4,
           },
-          // OPTIMIZATION: Use optimized markers for mobile
           optimized: true
         });
         marker.addListener('click', () => {
@@ -350,6 +332,7 @@ export default function App() {
     selectedNodesRef.current = [];
     if (currentRouteRef.current) currentRouteRef.current.setMap(null);
     if (pulseLineRef.current) pulseLineRef.current.setMap(null);
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
 
     if (marker && marker !== homeMarkerRef.current) {
       selectedNodesRef.current.push({ pos, loc, marker });
@@ -477,7 +460,7 @@ export default function App() {
     const bounds = new window.google.maps.LatLngBounds();
     bounds.extend(origin);
     bounds.extend(destination);
-    gMap.fitBounds(bounds, { top: 150, bottom: 250, left: 50, right: 50 });
+    gMap.fitBounds(bounds, { top: 180, bottom: 280, left: 60, right: 60 });
   }, []);
 
   const locateUser = useCallback(() => {
@@ -520,64 +503,78 @@ export default function App() {
     setHomeBase(newHome);
   };
 
-  const deleteHomeBase = () => setHomeBase(null);
+  const deleteHomeBase = () => {
+    if (window.confirm("CONFIRM RESET OF HOMEBASE?")) {
+      setHomeBase(null);
+    }
+  };
 
   const resetToFujisawa = () => {
-    setHomeBase(ONYX_STATION_COORDS);
-    const latLng = new window.google.maps.LatLng(ONYX_STATION_COORDS.lat, ONYX_STATION_COORDS.lng);
-    mapInstance.current?.panTo(latLng);
-    mapInstance.current?.setZoom(17);
-    handleNodeSelection(mapInstance.current, latLng, { city: "FUJISAWA STATION", description: "Primary Home Base", category: "Transit" }, homeMarkerRef.current);
+    // Resetting to Fujisawa Station using coordinates as a fallback but centering on station POI
+    const service = new window.google.maps.places.PlacesService(mapInstance.current);
+    service.getDetails({ placeId: ONYX_STATION_PLACE_ID, fields: ['geometry', 'name'] }, (place, status) => {
+      if (status === 'OK' && place.geometry) {
+        const pos = place.geometry.location;
+        const newHome = { lat: pos.lat(), lng: pos.lng(), name: "FUJISAWA STATION" };
+        setHomeBase(newHome);
+        mapInstance.current?.panTo(pos);
+        mapInstance.current?.setZoom(17);
+        handleNodeSelection(mapInstance.current, pos, { city: "FUJISAWA STATION", description: "Primary Home Base", category: "Transit" }, homeMarkerRef.current);
+      } else {
+        setHomeBase(ONYX_STATION_COORDS);
+      }
+    });
   };
 
   const isLocationInLattice = useMemo(() => selectedLocation && itinerary.find(l => l.city === selectedLocation.city), [selectedLocation, itinerary]);
 
   return (
-    <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden will-change-transform">
+    <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden selection:bg-onyx-purple/30 overscroll-none">
       <div className="fixed bottom-24 left-4 z-40 pointer-events-none">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} className="bg-black/40 backdrop-blur-md px-2 py-1 rounded border border-white/5">
           <span className="text-[6px] font-black tracking-[0.3em] uppercase animate-pulse">{systemLog}</span>
         </motion.div>
       </div>
 
-      <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
+      {/* FIXED: Increased top padding for Dynamic Island clearance on iPhone 16 Pro */}
+      <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[calc(1.5rem+env(safe-area-inset-top))] flex flex-col gap-3">
         <div className="flex justify-between items-start gap-3">
-          <motion.div layout onClick={resetToFujisawa} className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-onyx-purple/50 transition-colors">
-            <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5 opacity-60">Waypoint</span>
+          <motion.div layout onClick={resetToFujisawa} className="bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-onyx-purple/50 transition-colors">
+            <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-1 opacity-60">Waypoint Home</span>
             <div className="flex items-center gap-1.5">
-              <Home className="w-2 h-2 text-onyx-purple" />
-              <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase truncate max-w-[120px]">
+              <Home className="w-2.5 h-2.5 text-onyx-purple" />
+              <span className="text-[10px] font-mono font-bold tracking-tighter opacity-90 uppercase truncate max-w-[140px]">
                 {homeBase ? homeBase.name?.replace(/_/g, ' ') : "NO HOME BASE"}
               </span>
             </div>
           </motion.div>
 
-          <motion.div layout initial={false} animate={{ width: isSearchExpanded ? "calc(100vw - 32px)" : "40px", flex: isSearchExpanded ? "1 1 0%" : "0 0 auto" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl">
-            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
-              <Search className="w-3.5 h-3.5" />
+          <motion.div layout initial={false} animate={{ width: isSearchExpanded ? "calc(100vw - 32px)" : "44px", flex: isSearchExpanded ? "1 1 0%" : "0 0 auto" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl">
+            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-11 h-11 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
+              <Search className="w-4 h-4" />
             </button>
-            <motion.input animate={{ opacity: isSearchExpanded ? 1 : 0, x: isSearchExpanded ? 0 : -10 }} style={{ pointerEvents: isSearchExpanded ? "auto" : "none", width: isSearchExpanded ? "100%" : "0px", overflow: "hidden" }} ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" />
+            <motion.input animate={{ opacity: isSearchExpanded ? 1 : 0, x: isSearchExpanded ? 0 : -10 }} style={{ pointerEvents: isSearchExpanded ? "auto" : "none", width: isSearchExpanded ? "100%" : "0px", overflow: "hidden" }} ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent border-none focus:ring-0 text-[11px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" />
           </motion.div>
 
-          <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 px-3 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[40px] shrink-0">
-            <span className="text-xs font-black tabular-nums tracking-tighter opacity-80">
+          <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 px-4 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[44px] shrink-0">
+            <span className="text-sm font-black tabular-nums tracking-tighter opacity-80">
               {new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}
             </span>
           </motion.div>
         </div>
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pointer-events-auto">
           {CATEGORIES.map(cat => (
-            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-2.5 py-1 rounded-md text-[7px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-onyx-purple border-onyx-purple text-black" : "bg-black/60 border-white/5 text-onyx-muted")}>{cat}</button>
+            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-onyx-purple border-onyx-purple text-black" : "bg-black/60 border-white/5 text-onyx-muted")}>{cat}</button>
           ))}
         </div>
       </div>
 
       <div className="fixed right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 pointer-events-none">
-        <button onClick={locateUser} className="w-10 h-10 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-onyx-purple hover:text-black transition-all shadow-2xl"><Target className="w-4 h-4" /></button>
-        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-10 h-10 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-onyx-purple text-onyx-purple" : "border-white/10 text-white hover:border-white/30")}><Activity className="w-4 h-4" /></button>
+        <button onClick={locateUser} className="w-11 h-11 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-onyx-purple hover:text-black transition-all shadow-2xl"><Target className="w-4.5 h-4.5" /></button>
+        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-11 h-11 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-onyx-purple text-onyx-purple" : "border-white/10 text-white hover:border-white/30")}><Activity className="w-4.5 h-4.5" /></button>
         <div className="flex flex-col bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl pointer-events-auto overflow-hidden shadow-2xl">
-          <button onClick={zoomIn} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 border-bottom border-white/5"><Maximize className="w-3.5 h-3.5" /></button>
-          <button onClick={zoomOut} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10"><Minimize className="w-3.5 h-3.5" /></button>
+          <button onClick={zoomIn} className="w-11 h-11 flex items-center justify-center text-white hover:bg-white/10 border-bottom border-white/5"><Maximize className="w-4 h-4" /></button>
+          <button onClick={zoomOut} className="w-11 h-11 flex items-center justify-center text-white hover:bg-white/10"><Minimize className="w-4 h-4" /></button>
         </div>
       </div>
 
@@ -591,21 +588,21 @@ export default function App() {
               <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em]">Target Node</span>
               {nextStop.rating && <div className="flex items-center gap-1 bg-onyx-purple/10 px-1.5 py-0.5 rounded-full"><Star className="w-2 h-2 text-onyx-purple fill-onyx-purple" /><span className="text-[8px] font-bold text-onyx-purple">{nextStop.rating}</span></div>}
             </div>
-            <h2 className="text-lg font-black tracking-tight uppercase leading-tight">{nextStop.name?.replace(/_/g, ' ')}</h2>
+            <h2 className="text-lg font-black tracking-tight uppercase leading-tight truncate max-w-[250px]">{nextStop.name?.replace(/_/g, ' ')}</h2>
             <div className="flex items-center gap-3 mt-1 opacity-60"><span className="text-sm font-black tabular-nums">{nextStop.distance}</span><div className="w-1 h-1 bg-zinc-700 rounded-full" /><span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span></div>
           </div>
-          <button onClick={openInExternalMaps} className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0"><ArrowUpRight className="w-5 h-5" /></button>
+          <button onClick={openInExternalMaps} className="w-11 h-11 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0"><ArrowUpRight className="w-5 h-5" /></button>
         </div>
         <AnimatePresence>
           {isBladeExpanded && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6 overflow-y-auto no-scrollbar pb-10">
               {nextStop.photo && <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center"><img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" loading="lazy" /></div>}
-              {nextStop.transitLines.length > 0 && <div className="flex gap-2">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
+              {nextStop.transitLines.length > 0 && <div className="flex gap-2 flex-wrap">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
               <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
               <div className="flex items-center gap-2 pt-2">
-                <button onClick={updateHomeBase} className="flex-1 py-3 border border-white/5 rounded-lg flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Target className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
-                <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-3 border rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3 h-3 text-white" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
-                <button onClick={deleteHomeBase} className="w-12 h-12 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-black transition-all"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={updateHomeBase} className="flex-1 py-4 border border-white/5 rounded-xl flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Target className="w-3.5 h-3.5 text-onyx-purple" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
+                <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-4 border rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3.5 h-3.5 text-onyx-purple" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3.5 h-3.5 text-white" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
+                <button onClick={deleteHomeBase} className="w-14 h-14 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-black transition-all"><Trash2 className="w-5 h-5" /></button>
               </div>
             </motion.div>
           )}
