@@ -48,9 +48,9 @@ export default function App() {
   
   const [nextStop, setNextStop] = useState({
     name: "SHIBUYA STATION",
-    distance: "1.2KM",
-    eta: "14 MIN",
-    step: "Head North towards Hachiko Square",
+    distance: "0KM",
+    eta: "0 MIN",
+    step: "Lattice Sync Active",
     rating: null,
     photo: null,
     transitLines: []
@@ -111,7 +111,7 @@ export default function App() {
     try {
       const gMap = new window.google.maps.Map(mapRef.current, {
         center: homeBase,
-        zoom: 12,
+        zoom: 15,
         styles: obsidianStyle,
         disableDefaultUI: true,
         backgroundColor: '#000000',
@@ -138,26 +138,16 @@ export default function App() {
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
         } else {
-          // Snap-to-POI: Find nearest business within 50m
           const service = new window.google.maps.places.PlacesService(gMap);
-          service.nearbySearch({
-            location: e.latLng,
-            radius: 50,
-            type: ['point_of_interest']
-          }, (results, status) => {
+          service.nearbySearch({ location: e.latLng, radius: 50, type: ['point_of_interest'] }, (results, status) => {
             if (status === 'OK' && results[0]) {
               fetchRichData(gMap, results[0].place_id, results[0].geometry.location, null);
             } else {
-              // Fallback to address if no POI nearby
               const geocoder = new window.google.maps.Geocoder();
               geocoder.geocode({ location: e.latLng }, (results, status) => {
                 if (status === 'OK' && results[0]) {
                   const res = results[0];
-                  handleNodeSelection(gMap, e.latLng, { 
-                    city: res.formatted_address.split(',')[0], 
-                    description: res.formatted_address, 
-                    category: "Point of Interest" 
-                  }, null);
+                  handleNodeSelection(gMap, e.latLng, { city: res.formatted_address.split(',')[0], description: res.formatted_address, category: "Point" }, null);
                 }
               });
             }
@@ -179,7 +169,7 @@ export default function App() {
         const loc = { 
           city: place.name, 
           description: place.formatted_address, 
-          category: place.types[0]?.charAt(0).toUpperCase() + place.types[0]?.slice(1) || "Point",
+          category: place.types?.[0]?.charAt(0).toUpperCase() + place.types?.[0]?.slice(1) || "Point",
           rating: place.rating, 
           photo: place.photos ? place.photos[0].getUrl({ maxWidth: 800 }) : null 
         };
@@ -280,6 +270,28 @@ export default function App() {
   }
 
   function calculateRoute(gMap, origin, destination, locData) {
+    // Check if origin and destination are the same
+    const dist = window.google.maps.geometry.spherical.computeDistanceBetween(
+      new window.google.maps.LatLng(origin.lat, origin.lng),
+      destination
+    );
+
+    if (dist < 10) {
+      // Too close for a route, just show info
+      setNextStop({
+        name: (locData.city || locData.name || "HOME").toUpperCase(),
+        distance: "0M",
+        eta: "ARRIVED",
+        step: "You are currently at this node.",
+        rating: locData.rating,
+        photo: locData.photo,
+        transitLines: []
+      });
+      setIsBladeExpanded(true);
+      gMap.panTo(destination);
+      return;
+    }
+
     const service = new window.google.maps.DirectionsService();
     service.route({
       origin: origin,
@@ -295,7 +307,11 @@ export default function App() {
           destination: destination,
           travelMode: window.google.maps.TravelMode.WALKING
         }, (walkResult, walkStatus) => {
-          if (walkStatus === 'OK') renderOnyxRoute(gMap, walkResult, locData, destination, origin);
+          if (walkStatus === 'OK') {
+            renderOnyxRoute(gMap, walkResult, locData, destination, origin);
+          } else {
+            console.error("ONYX SYSTEM: Route calculation failed", walkStatus);
+          }
         });
       }
     });
@@ -402,8 +418,6 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden">
-
-      {/* Top HUD Overlays */}
       <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
         <div className="flex justify-between items-start gap-3">
           <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0">
@@ -418,16 +432,7 @@ export default function App() {
             <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
               <Search className="w-3.5 h-3.5" />
             </button>
-            <motion.input 
-              animate={{ opacity: isSearchExpanded ? 1 : 0, x: isSearchExpanded ? 0 : -10 }}
-              style={{ pointerEvents: isSearchExpanded ? "auto" : "none", width: isSearchExpanded ? "100%" : "0px", overflow: "hidden" }}
-              ref={searchInputRef} 
-              type="text" 
-              placeholder="SEARCH GRID..." 
-              value={searchQuery} 
-              onChange={(e) => setSearchQuery(e.target.value)} 
-              className="flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" 
-            />
+            <motion.input animate={{ opacity: isSearchExpanded ? 1 : 0, x: isSearchExpanded ? 0 : -10 }} style={{ pointerEvents: isSearchExpanded ? "auto" : "none", width: isSearchExpanded ? "100%" : "0px", overflow: "hidden" }} ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" />
           </motion.div>
 
           <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 px-3 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[40px] shrink-0">
@@ -436,24 +441,16 @@ export default function App() {
             </span>
           </motion.div>
         </div>
-
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pointer-events-auto">
           {CATEGORIES.map(cat => (
-            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-2.5 py-1 rounded-md text-[7px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-onyx-purple border-onyx-purple text-black" : "bg-black/60 border-white/5 text-onyx-muted")}>
-              {cat}
-            </button>
+            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-2.5 py-1 rounded-md text-[7px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-onyx-purple border-onyx-purple text-black" : "bg-black/60 border-white/5 text-onyx-muted")}>{cat}</button>
           ))}
         </div>
       </div>
 
-      {/* Right Side Map Controls HUD */}
       <div className="fixed right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 pointer-events-none">
-        <button onClick={locateUser} className="w-10 h-10 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-onyx-purple hover:text-black transition-all shadow-2xl">
-          <Target className="w-4 h-4" />
-        </button>
-        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-10 h-10 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-onyx-purple text-onyx-purple" : "border-white/10 text-white hover:border-white/30")}>
-          <Activity className="w-4 h-4" />
-        </button>
+        <button onClick={locateUser} className="w-10 h-10 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-onyx-purple hover:text-black transition-all shadow-2xl"><Target className="w-4 h-4" /></button>
+        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-10 h-10 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-onyx-purple text-onyx-purple" : "border-white/10 text-white hover:border-white/30")}><Activity className="w-4 h-4" /></button>
         <div className="flex flex-col bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl pointer-events-auto overflow-hidden shadow-2xl">
           <button onClick={zoomIn} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 border-bottom border-white/5"><Maximize className="w-3.5 h-3.5" /></button>
           <button onClick={zoomOut} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10"><Minimize className="w-3.5 h-3.5" /></button>
@@ -462,75 +459,25 @@ export default function App() {
 
       <div ref={mapRef} className="flex-1 w-full bg-black" />
 
-      {/* Stealth Navigation HUD (Bottom Sheet) */}
-      <motion.div 
-        drag="y"
-        dragConstraints={{ top: 0, bottom: 0 }}
-        dragElastic={0.1}
-        onDragEnd={(e, info) => {
-          if (info.offset.y > 50) setIsBladeExpanded(false);
-          if (info.offset.y < -50) setIsBladeExpanded(true);
-        }}
-        animate={{ height: isBladeExpanded ? "65%" : "84px", y: 0 }}
-        transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="bg-black/95 backdrop-blur-2xl border-t border-white/10 rounded-t-[24px] p-5 pt-7 relative z-30 shadow-[0_-20px_60px_rgba(0,0,0,1)] touch-none"
-      >
+      <motion.div drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={0.1} onDragEnd={(e, info) => { if (info.offset.y > 50) setIsBladeExpanded(false); if (info.offset.y < -50) setIsBladeExpanded(true); }} animate={{ height: isBladeExpanded ? "65%" : "84px", y: 0 }} transition={{ type: "spring", damping: 30, stiffness: 300 }} className="bg-black/95 backdrop-blur-2xl border-t border-white/10 rounded-t-[24px] p-5 pt-7 relative z-30 shadow-[0_-20px_60_rgba(0,0,0,1)] touch-none">
         <div onClick={() => setIsBladeExpanded(!isBladeExpanded)} className="absolute top-2.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-white/10 rounded-full cursor-pointer hover:bg-onyx-purple/40" />
-
         <div className="flex items-start justify-between">
           <div className="flex flex-col flex-1">
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em]">Target Node</span>
-              {nextStop.rating && (
-                <div className="flex items-center gap-1 bg-onyx-purple/10 px-1.5 py-0.5 rounded-full">
-                  <Star className="w-2 h-2 text-onyx-purple fill-onyx-purple" />
-                  <span className="text-[8px] font-bold text-onyx-purple">{nextStop.rating}</span>
-                </div>
-              )}
+              {nextStop.rating && <div className="flex items-center gap-1 bg-onyx-purple/10 px-1.5 py-0.5 rounded-full"><Star className="w-2 h-2 text-onyx-purple fill-onyx-purple" /><span className="text-[8px] font-bold text-onyx-purple">{nextStop.rating}</span></div>}
             </div>
             <h2 className="text-lg font-black tracking-tight uppercase leading-tight">{nextStop.name?.replace(/_/g, ' ')}</h2>
-            <div className="flex items-center gap-3 mt-1 opacity-60">
-              <span className="text-sm font-black tabular-nums">{nextStop.distance}</span>
-              <div className="w-1 h-1 bg-zinc-700 rounded-full" />
-              <span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span>
-            </div>
+            <div className="flex items-center gap-3 mt-1 opacity-60"><span className="text-sm font-black tabular-nums">{nextStop.distance}</span><div className="w-1 h-1 bg-zinc-700 rounded-full" /><span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span></div>
           </div>
-          <button 
-            onClick={openInExternalMaps}
-            className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0"
-          >
-            <ArrowUpRight className="w-5 h-5" />
-          </button>
+          <button onClick={openInExternalMaps} className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0"><ArrowUpRight className="w-5 h-5" /></button>
         </div>
-
         <AnimatePresence>
           {isBladeExpanded && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6 overflow-y-auto no-scrollbar pb-10">
-              
-              {/* Photo Preview if available */}
-              {nextStop.photo && (
-                <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center">
-                  <img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" />
-                </div>
-              )}
-
-              {/* Transit Line HUD */}
-              {nextStop.transitLines.length > 0 && (
-                <div className="flex gap-2">
-                  {nextStop.transitLines.map((line, idx) => (
-                    <div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} />
-                      <span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex items-start gap-3 opacity-90">
-                <Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" />
-                <p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p>
-              </div>
-
+              {nextStop.photo && <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center"><img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" /></div>}
+              {nextStop.transitLines.length > 0 && <div className="flex gap-2">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
+              <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
               <div className="flex items-center gap-2 pt-2">
                 <button onClick={updateHomeBase} className="flex-1 py-3 border border-white/5 rounded-lg flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Home className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
                 <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-3 border rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3 h-3 text-white" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
@@ -539,7 +486,6 @@ export default function App() {
           )}
         </AnimatePresence>
       </motion.div>
-
     </div>
   );
 }
