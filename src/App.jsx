@@ -329,11 +329,23 @@ export default function App() {
             <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
               <Search className="w-3.5 h-3.5" />
             </button>
-            <AnimatePresence>
-              {isSearchExpanded && (
-                <motion.input initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" />
-              )}
-            </AnimatePresence>
+            <motion.input 
+              animate={{ 
+                opacity: isSearchExpanded ? 1 : 0,
+                x: isSearchExpanded ? 0 : -10,
+              }}
+              style={{ 
+                pointerEvents: isSearchExpanded ? "auto" : "none",
+                width: isSearchExpanded ? "100%" : "0px",
+                overflow: "hidden"
+              }}
+              ref={searchInputRef} 
+              type="text" 
+              placeholder="SEARCH GRID..." 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)} 
+              className="flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" 
+            />
           </motion.div>
 
           <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 px-3 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[40px] shrink-0">
