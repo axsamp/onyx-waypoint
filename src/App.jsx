@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Navigation, Compass, Search, X, Home, Plus, CheckCircle2, Zap, ArrowUpRight,
-  Maximize, Minimize, Map as MapIcon, Star, Camera, Activity, Target
+  Maximize, Minimize, Map as MapIcon, Star, Camera, Activity, Target, Trash2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -14,8 +14,8 @@ function cn(...inputs) {
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
-// FUJISAWA STATION - THE ABSOLUTE HOME BASE
-const ONYX_HOME_BASE = { lat: 35.3372, lng: 139.4872, name: "FUJISAWA STATION" };
+// THE EXACT COORDINATES FOR FUJISAWA STATION ICON ON GOOGLE MAPS
+const ONYX_STATION_COORDS = { lat: 35.3389164, lng: 139.4874922, name: "FUJISAWA STATION" };
 
 const EMERGENCY_NODES = [
   { city: "US Embassy Tokyo", lat: 35.6672, lng: 139.7424, category: "Emergency", description: "Diplomatic Protection" },
@@ -45,10 +45,10 @@ export default function App() {
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   
+  // Home Base - Default to Fujisawa Station, but respect user overrides
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
-    const parsed = saved ? JSON.parse(saved) : null;
-    return (parsed && parsed.name === ONYX_HOME_BASE.name) ? parsed : ONYX_HOME_BASE;
+    return saved ? JSON.parse(saved) : ONYX_STATION_COORDS;
   });
   
   const [nextStop, setNextStop] = useState({
@@ -66,13 +66,22 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('onyx_waypoint_home', JSON.stringify(homeBase));
+    if (homeBase) {
+      localStorage.setItem('onyx_waypoint_home', JSON.stringify(homeBase));
+    } else {
+      localStorage.removeItem('onyx_waypoint_home');
+    }
+    // Update Home Marker position
+    if (homeMarkerRef.current && homeBase) {
+      homeMarkerRef.current.setPosition(new window.google.maps.LatLng(homeBase.lat, homeBase.lng));
+      homeMarkerRef.current.setVisible(true);
+    } else if (homeMarkerRef.current) {
+      homeMarkerRef.current.setVisible(false);
+    }
   }, [homeBase]);
 
   useEffect(() => {
-    if (mapInstance.current) {
-      syncMarkers(mapInstance.current);
-    }
+    if (mapInstance.current) syncMarkers(mapInstance.current);
   }, [activeFilter, itinerary]);
 
   useEffect(() => {
@@ -114,9 +123,10 @@ export default function App() {
   function initMap() {
     if (mapInstance.current) return;
     try {
+      const centerPos = homeBase || ONYX_STATION_COORDS;
       const gMap = new window.google.maps.Map(mapRef.current, {
-        center: homeBase,
-        zoom: 15,
+        center: centerPos,
+        zoom: 16,
         styles: obsidianStyle,
         disableDefaultUI: true,
         backgroundColor: '#000000',
@@ -126,7 +136,7 @@ export default function App() {
       mapInstance.current = gMap;
       
       homeMarkerRef.current = new window.google.maps.Marker({
-        position: ONYX_HOME_BASE,
+        position: new window.google.maps.LatLng(centerPos.lat, centerPos.lng),
         map: gMap,
         title: "HOME BASE",
         icon: {
@@ -137,11 +147,14 @@ export default function App() {
           strokeWeight: 2,
           scale: 8,
         },
-        zIndex: 999
+        zIndex: 999,
+        visible: !!homeBase
       });
+
       homeMarkerRef.current.addListener('click', () => {
-        const latLng = new window.google.maps.LatLng(ONYX_HOME_BASE.lat, ONYX_HOME_BASE.lng);
-        handleNodeSelection(gMap, latLng, { city: "FUJISAWA STATION", description: "Home Base", category: "Transit" }, homeMarkerRef.current);
+        if (!homeBase) return;
+        const latLng = new window.google.maps.LatLng(homeBase.lat, homeBase.lng);
+        handleNodeSelection(gMap, latLng, { city: homeBase.name || "HOME BASE", description: "Pinned Location", category: "Home" }, homeMarkerRef.current);
       });
 
       syncMarkers(gMap);
@@ -295,7 +308,20 @@ export default function App() {
       });
     }
 
-    calculateRoute(gMap, homeBase, pos, loc);
+    if (homeBase) {
+      calculateRoute(gMap, homeBase, pos, loc);
+    } else {
+      setNextStop({
+        name: (loc.city || loc.name || "TARGET").toUpperCase(),
+        distance: "N/A",
+        eta: "N/A",
+        step: "Set a Home Base to see routes.",
+        rating: loc.rating || null,
+        photo: loc.photo || null,
+        transitLines: []
+      });
+      setIsBladeExpanded(true);
+    }
   }
 
   function calculateRoute(gMap, origin, destination, locData) {
@@ -311,7 +337,7 @@ export default function App() {
         name: (locData.city || locData.name || "HOME").toUpperCase(),
         distance: "0M",
         eta: "ARRIVED",
-        step: "You are currently at the Main Home Base.",
+        step: "You are currently at the Home Base.",
         rating: locData.rating || null,
         photo: locData.photo || null,
         transitLines: []
@@ -412,7 +438,7 @@ export default function App() {
       navigator.geolocation.getCurrentPosition((pos) => {
         const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         mapInstance.current?.panTo(coords);
-        mapInstance.current?.setZoom(15);
+        mapInstance.current?.setZoom(16);
       });
     }
   };
@@ -421,7 +447,7 @@ export default function App() {
   const zoomOut = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() - 1);
 
   const openInExternalMaps = () => {
-    if (!selectedLocation) return;
+    if (!selectedLocation || !homeBase) return;
     const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${selectedLocation.pos.lat?.() || selectedLocation.pos.lat},${selectedLocation.pos.lng?.() || selectedLocation.pos.lng}&travelmode=transit`;
     window.open(url, '_blank');
   };
@@ -435,12 +461,24 @@ export default function App() {
     setItinerary(updated);
   };
 
-  const resetHomeBase = () => {
-    setHomeBase(ONYX_HOME_BASE);
-    const latLng = new window.google.maps.LatLng(ONYX_HOME_BASE.lat, ONYX_HOME_BASE.lng);
-    handleNodeSelection(mapInstance.current, latLng, { city: "FUJISAWA STATION", description: "Home Base", category: "Transit" }, homeMarkerRef.current);
-    mapInstance.current?.panTo(latLng);
-    mapInstance.current?.setZoom(15);
+  const updateHomeBase = () => {
+    if (!selectedLocation) return;
+    const newHome = { 
+      lat: selectedLocation.pos.lat?.() || selectedLocation.pos.lat, 
+      lng: selectedLocation.pos.lng?.() || selectedLocation.pos.lng, 
+      name: selectedLocation.city.toUpperCase() 
+    };
+    setHomeBase(newHome);
+  };
+
+  const deleteHomeBase = () => {
+    setHomeBase(null);
+  };
+
+  const resetToFujisawa = () => {
+    setHomeBase(ONYX_STATION_COORDS);
+    mapInstance.current?.panTo(new window.google.maps.LatLng(ONYX_STATION_COORDS.lat, ONYX_STATION_COORDS.lng));
+    mapInstance.current?.setZoom(16);
   };
 
   const isLocationInLattice = selectedLocation && itinerary.find(l => l.city === selectedLocation.city);
@@ -449,11 +487,13 @@ export default function App() {
     <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden">
       <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
         <div className="flex justify-between items-start gap-3">
-          <motion.div layout onClick={resetHomeBase} className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-onyx-purple/50 transition-colors">
+          <motion.div layout onClick={resetToFujisawa} className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-onyx-purple/50 transition-colors">
             <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5 opacity-60">Waypoint</span>
             <div className="flex items-center gap-1.5">
               <Home className="w-2 h-2 text-onyx-purple" />
-              <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase">{homeBase.name?.replace(/_/g, ' ')}</span>
+              <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase truncate max-w-[120px]">
+                {homeBase ? homeBase.name?.replace(/_/g, ' ') : "NO HOME BASE"}
+              </span>
             </div>
           </motion.div>
 
@@ -508,8 +548,9 @@ export default function App() {
               {nextStop.transitLines.length > 0 && <div className="flex gap-2">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
               <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
               <div className="flex items-center gap-2 pt-2">
-                <button onClick={resetHomeBase} className="flex-1 py-3 border border-onyx-purple/30 bg-onyx-purple/5 rounded-lg flex items-center justify-center gap-2 hover:bg-onyx-purple/10 active:scale-95 transition-all"><Target className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Reset Home</span></button>
+                <button onClick={updateHomeBase} className="flex-1 py-3 border border-white/5 rounded-lg flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Target className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
                 <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-3 border rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3 h-3 text-white" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
+                <button onClick={deleteHomeBase} className="w-12 h-12 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-black transition-all"><Trash2 className="w-4 h-4" /></button>
               </div>
             </motion.div>
           )}
