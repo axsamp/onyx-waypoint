@@ -137,6 +137,19 @@ export default function App() {
         if (e.placeId) {
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
+        } else {
+          // Clicked an empty spot - Reverse Geocode it
+          const geocoder = new window.google.maps.Geocoder();
+          geocoder.geocode({ location: e.latLng }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+              const res = results[0];
+              handleNodeSelection(gMap, e.latLng, { 
+                city: res.formatted_address.split(',')[0], 
+                description: res.formatted_address, 
+                category: "Point of Interest" 
+              }, null);
+            }
+          });
         }
       });
     } catch (err) {
@@ -151,16 +164,14 @@ export default function App() {
       fields: ["name", "rating", "photos", "formatted_address", "types", "geometry"]
     }, (place, status) => {
       if (status === 'OK') {
-        const loc = basicData || { 
+        const loc = { 
           city: place.name, 
           description: place.formatted_address, 
-          category: place.types[0]?.charAt(0).toUpperCase() + place.types[0]?.slice(1) || "Point"
-        };
-        handleNodeSelection(gMap, place.geometry.location, { 
-          ...loc, 
+          category: place.types[0]?.charAt(0).toUpperCase() + place.types[0]?.slice(1) || "Point",
           rating: place.rating, 
-          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 400 }) : null 
-        }, null);
+          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 800 }) : null 
+        };
+        handleNodeSelection(gMap, place.geometry.location, loc, null);
       } else if (basicData) {
         handleNodeSelection(gMap, pos, basicData, null);
       }
@@ -284,8 +295,6 @@ export default function App() {
     if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
 
     const route = result.routes[0].legs[0];
-    
-    // Extract Transit Lines
     const transitLines = route.steps
       .filter(step => step.transit)
       .map(step => ({
@@ -479,8 +488,8 @@ export default function App() {
               
               {/* Photo Preview if available */}
               {nextStop.photo && (
-                <div className="w-full h-32 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center">
-                  <img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-60 hover:opacity-100 transition-opacity" />
+                <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center">
+                  <img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" />
                 </div>
               )}
 
