@@ -84,7 +84,7 @@ export default function App() {
   useEffect(() => {
     if (!window.google) {
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&callback=initMap`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,geometry&callback=initMap`;
       script.async = true;
       script.defer = true;
       window.initMap = initMap;
@@ -270,11 +270,14 @@ export default function App() {
   }
 
   function calculateRoute(gMap, origin, destination, locData) {
-    // Check if origin and destination are the same
-    const dist = window.google.maps.geometry.spherical.computeDistanceBetween(
-      new window.google.maps.LatLng(origin.lat, origin.lng),
-      destination
-    );
+    // Safety check for geometry library
+    let dist = 1000; 
+    if (window.google && window.google.maps && window.google.maps.geometry) {
+      dist = window.google.maps.geometry.spherical.computeDistanceBetween(
+        new window.google.maps.LatLng(origin.lat, origin.lng),
+        destination
+      );
+    }
 
     if (dist < 10) {
       // Too close for a route, just show info
