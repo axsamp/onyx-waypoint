@@ -325,7 +325,7 @@ export default function App() {
 
   const updateHomeBase = () => {
     if (!selectedLocation) return;
-    setHomeBase({ lat: selectedLocation.pos.lat(), lng: selectedLocation.pos.lng(), name: selectedLocation.city.toUpperCase().replace(/\s+/g, '_') });
+    setHomeBase({ lat: selectedLocation.pos.lat(), lng: selectedLocation.pos.lng(), name: selectedLocation.city.toUpperCase() });
   };
 
   const isLocationInLattice = selectedLocation && itinerary.find(l => l.city === selectedLocation.city);
@@ -337,32 +337,49 @@ export default function App() {
       <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
         
         <div className="flex justify-between items-start gap-3">
-          <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl">
+          <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0">
             <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5 opacity-60">Waypoint</span>
             <div className="flex items-center gap-1.5">
               <Home className="w-2 h-2 text-onyx-purple" />
               <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase">{homeBase.name}</span>
             </div>
-          </div>
+          </motion.div>
 
           <motion.div 
+            layout
+            initial={false}
             animate={{ 
               width: isSearchExpanded ? "calc(100vw - 32px)" : "40px",
               flex: isSearchExpanded ? "1 1 0%" : "0 0 auto"
             }}
-            className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl transition-all"
+            transition={{ type: "spring", damping: 30, stiffness: 350 }}
+            className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl"
           >
-            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5">
+            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
               <Search className="w-3.5 h-3.5" />
             </button>
-            <input ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={cn("flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800 transition-opacity", isSearchExpanded ? "opacity-100" : "opacity-0 pointer-events-none")} />
+            <AnimatePresence>
+              {isSearchExpanded && (
+                <motion.input 
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  ref={searchInputRef} 
+                  type="text" 
+                  placeholder="SEARCH GRID..." 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  className="flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" 
+                />
+              )}
+            </AnimatePresence>
           </motion.div>
 
-          <div className="bg-black/80 backdrop-blur-xl border border-white/10 px-3 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[40px]">
+          <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 px-3 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[40px] shrink-0">
             <span className="text-xs font-black tabular-nums tracking-tighter opacity-80">
               {new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}
             </span>
-          </div>
+          </motion.div>
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pointer-events-auto">
