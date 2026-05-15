@@ -138,16 +138,28 @@ export default function App() {
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
         } else {
-          // Clicked an empty spot - Reverse Geocode it
-          const geocoder = new window.google.maps.Geocoder();
-          geocoder.geocode({ location: e.latLng }, (results, status) => {
+          // Snap-to-POI: Find nearest business within 50m
+          const service = new window.google.maps.places.PlacesService(gMap);
+          service.nearbySearch({
+            location: e.latLng,
+            radius: 50,
+            type: ['point_of_interest']
+          }, (results, status) => {
             if (status === 'OK' && results[0]) {
-              const res = results[0];
-              handleNodeSelection(gMap, e.latLng, { 
-                city: res.formatted_address.split(',')[0], 
-                description: res.formatted_address, 
-                category: "Point of Interest" 
-              }, null);
+              fetchRichData(gMap, results[0].place_id, results[0].geometry.location, null);
+            } else {
+              // Fallback to address if no POI nearby
+              const geocoder = new window.google.maps.Geocoder();
+              geocoder.geocode({ location: e.latLng }, (results, status) => {
+                if (status === 'OK' && results[0]) {
+                  const res = results[0];
+                  handleNodeSelection(gMap, e.latLng, { 
+                    city: res.formatted_address.split(',')[0], 
+                    description: res.formatted_address, 
+                    category: "Point of Interest" 
+                  }, null);
+                }
+              });
             }
           });
         }
