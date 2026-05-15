@@ -13,7 +13,6 @@ function cn(...inputs) {
 }
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-// FIXED: Using Official Place ID for Fujisawa Station to ensure absolute precision
 const ONYX_STATION_PLACE_ID = "ChIJzU69wZ6LGGAR-8qf8Qy_51Q";
 const ONYX_STATION_COORDS = { lat: 35.3389164, lng: 139.4874922, name: "FUJISAWA STATION" };
 
@@ -70,7 +69,6 @@ export default function App() {
     setSystemLog(msg.toUpperCase());
   }, []);
 
-  // FIXED: Replaced polling with high-efficiency storage event listener
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key === 'onyx_itinerary_locations') {
@@ -81,7 +79,6 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // Sync Home Base with Storage
   useEffect(() => {
     if (homeBase) {
       localStorage.setItem('onyx_waypoint_home', JSON.stringify(homeBase));
@@ -181,7 +178,7 @@ export default function App() {
           path: window.google.maps.SymbolPath.CIRCLE,
           fillColor: '#FFFFFF',
           fillOpacity: 1,
-          strokeColor: '#C084FC',
+          strokeColor: '#FFC107',
           strokeWeight: 3,
           scale: 10,
         },
@@ -214,7 +211,6 @@ export default function App() {
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
         } else {
-          // FIXED: Modern geocoding pattern
           const geocoder = new window.google.maps.Geocoder();
           geocoder.geocode({ location: e.latLng }, (results, status) => {
             if (status === 'OK' && results[0]) {
@@ -230,9 +226,7 @@ export default function App() {
     }
   }, [homeBase, log]);
 
-  // FIXED: Migrated from deprecated PlacesService to the modern Place search pattern
   const fetchRichData = useCallback((gMap, placeId, pos, basicData) => {
-    // We use Detail search which is still part of the stable library but updated for v3.56
     const service = new window.google.maps.places.PlacesService(gMap);
     service.getDetails({ 
       placeId: placeId,
@@ -305,7 +299,7 @@ export default function App() {
       map: gMap,
       icon: {
         path: window.google.maps.SymbolPath.CIRCLE,
-        fillColor: '#C084FC',
+        fillColor: '#FFC107',
         fillOpacity: 1,
         strokeColor: '#FFFFFF',
         strokeWeight: 1.5,
@@ -323,7 +317,7 @@ export default function App() {
     
     selectedNodesRef.current.forEach(n => n.marker && n.marker.setIcon({
       path: window.google.maps.SymbolPath.CIRCLE,
-      fillColor: '#C084FC',
+      fillColor: '#FFC107',
       fillOpacity: 1,
       strokeColor: '#FFFFFF',
       strokeWeight: 1.5,
@@ -340,7 +334,7 @@ export default function App() {
         path: window.google.maps.SymbolPath.CIRCLE,
         fillColor: '#FFFFFF',
         fillOpacity: 1,
-        strokeColor: '#C084FC',
+        strokeColor: '#FFC107',
         strokeWeight: 2,
         scale: 8,
       });
@@ -418,13 +412,13 @@ export default function App() {
       .filter(step => step.transit)
       .map(step => ({
         name: step.transit.line.short_name || step.transit.line.name,
-        color: step.transit.line.color || '#C084FC'
+        color: step.transit.line.color || '#FFC107'
       }));
 
     currentRouteRef.current = new window.google.maps.Polyline({
       path: result.routes[0].overview_path,
       geodesic: true,
-      strokeColor: '#C084FC',
+      strokeColor: '#FFC107',
       strokeOpacity: 0.15,
       strokeWeight: 3,
       map: gMap
@@ -433,7 +427,7 @@ export default function App() {
     pulseLineRef.current = new window.google.maps.Polyline({
       path: result.routes[0].overview_path,
       geodesic: true,
-      strokeColor: '#C084FC',
+      strokeColor: '#FFC107',
       strokeOpacity: 1,
       strokeWeight: 2,
       icons: [{
@@ -510,7 +504,6 @@ export default function App() {
   };
 
   const resetToFujisawa = () => {
-    // Resetting to Fujisawa Station using coordinates as a fallback but centering on station POI
     const service = new window.google.maps.places.PlacesService(mapInstance.current);
     service.getDetails({ placeId: ONYX_STATION_PLACE_ID, fields: ['geometry', 'name'] }, (place, status) => {
       if (status === 'OK' && place.geometry) {
@@ -529,20 +522,19 @@ export default function App() {
   const isLocationInLattice = useMemo(() => selectedLocation && itinerary.find(l => l.city === selectedLocation.city), [selectedLocation, itinerary]);
 
   return (
-    <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden selection:bg-onyx-purple/30 overscroll-none">
+    <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden selection:bg-[#FFC107]/30 overscroll-none">
       <div className="fixed bottom-24 left-4 z-40 pointer-events-none">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} className="bg-black/40 backdrop-blur-md px-2 py-1 rounded border border-white/5">
           <span className="text-[6px] font-black tracking-[0.3em] uppercase animate-pulse">{systemLog}</span>
         </motion.div>
       </div>
 
-      {/* FIXED: Increased top padding for Dynamic Island clearance on iPhone 16 Pro */}
       <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[calc(1.5rem+env(safe-area-inset-top))] flex flex-col gap-3">
         <div className="flex justify-between items-start gap-3">
-          <motion.div layout onClick={resetToFujisawa} className="bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-onyx-purple/50 transition-colors">
-            <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-1 opacity-60">Waypoint Home</span>
+          <motion.div layout onClick={resetToFujisawa} className="bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0 cursor-pointer hover:border-[#FFC107]/50 transition-colors">
+            <span className="text-[7px] font-black text-[#FFC107] uppercase tracking-[0.4em] mb-1 opacity-60">Waypoint Home</span>
             <div className="flex items-center gap-1.5">
-              <Home className="w-2.5 h-2.5 text-onyx-purple" />
+              <Home className="w-2.5 h-2.5 text-[#FFC107]" />
               <span className="text-[10px] font-mono font-bold tracking-tighter opacity-90 uppercase truncate max-w-[140px]">
                 {homeBase ? homeBase.name?.replace(/_/g, ' ') : "NO HOME BASE"}
               </span>
@@ -550,7 +542,7 @@ export default function App() {
           </motion.div>
 
           <motion.div layout initial={false} animate={{ width: isSearchExpanded ? "calc(100vw - 32px)" : "44px", flex: isSearchExpanded ? "1 1 0%" : "0 0 auto" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl">
-            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-11 h-11 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
+            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-11 h-11 flex items-center justify-center shrink-0 text-[#FFC107] hover:bg-white/5 active:scale-90 transition-transform">
               <Search className="w-4 h-4" />
             </button>
             <motion.input animate={{ opacity: isSearchExpanded ? 1 : 0, x: isSearchExpanded ? 0 : -10 }} style={{ pointerEvents: isSearchExpanded ? "auto" : "none", width: isSearchExpanded ? "100%" : "0px", overflow: "hidden" }} ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent border-none focus:ring-0 text-[11px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800" />
@@ -564,14 +556,14 @@ export default function App() {
         </div>
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pointer-events-auto">
           {CATEGORIES.map(cat => (
-            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-onyx-purple border-onyx-purple text-black" : "bg-black/60 border-white/5 text-onyx-muted")}>{cat}</button>
+            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-[#FFC107] border-[#FFC107] text-black" : "bg-black/60 border-white/5 text-zinc-600")}>{cat}</button>
           ))}
         </div>
       </div>
 
       <div className="fixed right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 pointer-events-none">
-        <button onClick={locateUser} className="w-11 h-11 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-onyx-purple hover:text-black transition-all shadow-2xl"><Target className="w-4.5 h-4.5" /></button>
-        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-11 h-11 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-onyx-purple text-onyx-purple" : "border-white/10 text-white hover:border-white/30")}><Activity className="w-4.5 h-4.5" /></button>
+        <button onClick={locateUser} className="w-11 h-11 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-[#FFC107] hover:text-black transition-all shadow-2xl"><Target className="w-4.5 h-4.5" /></button>
+        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-11 h-11 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-[#FFC107] text-[#FFC107]" : "border-white/10 text-white hover:border-white/30")}><Activity className="w-4.5 h-4.5" /></button>
         <div className="flex flex-col bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl pointer-events-auto overflow-hidden shadow-2xl">
           <button onClick={zoomIn} className="w-11 h-11 flex items-center justify-center text-white hover:bg-white/10 border-bottom border-white/5"><Maximize className="w-4 h-4" /></button>
           <button onClick={zoomOut} className="w-11 h-11 flex items-center justify-center text-white hover:bg-white/10"><Minimize className="w-4 h-4" /></button>
@@ -581,27 +573,27 @@ export default function App() {
       <div ref={mapRef} className="flex-1 w-full bg-black" />
 
       <motion.div drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={0.1} onDragEnd={(e, info) => { if (info.offset.y > 50) setIsBladeExpanded(false); if (info.offset.y < -50) setIsBladeExpanded(true); }} animate={{ height: isBladeExpanded ? "65%" : "84px", y: 0 }} transition={{ type: "spring", damping: 30, stiffness: 300 }} className="bg-black/95 backdrop-blur-2xl border-t border-white/10 rounded-t-[24px] p-5 pt-7 relative z-30 shadow-[0_-20px_60_rgba(0,0,0,1)] touch-none">
-        <div onClick={() => setIsBladeExpanded(!isBladeExpanded)} className="absolute top-2.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-white/10 rounded-full cursor-pointer hover:bg-onyx-purple/40" />
+        <div onClick={() => setIsBladeExpanded(!isBladeExpanded)} className="absolute top-2.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-white/10 rounded-full cursor-pointer hover:bg-[#FFC107]/40" />
         <div className="flex items-start justify-between">
           <div className="flex flex-col flex-1">
             <div className="flex items-center gap-2 mb-0.5">
-              <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em]">Target Node</span>
-              {nextStop.rating && <div className="flex items-center gap-1 bg-onyx-purple/10 px-1.5 py-0.5 rounded-full"><Star className="w-2 h-2 text-onyx-purple fill-onyx-purple" /><span className="text-[8px] font-bold text-onyx-purple">{nextStop.rating}</span></div>}
+              <span className="text-[8px] font-black text-[#FFC107] uppercase tracking-[0.4em]">Target Node</span>
+              {nextStop.rating && <div className="flex items-center gap-1 bg-[#FFC107]/10 px-1.5 py-0.5 rounded-full"><Star className="w-2 h-2 text-[#FFC107] fill-[#FFC107]" /><span className="text-[8px] font-bold text-[#FFC107]">{nextStop.rating}</span></div>}
             </div>
             <h2 className="text-lg font-black tracking-tight uppercase leading-tight truncate max-w-[250px]">{nextStop.name?.replace(/_/g, ' ')}</h2>
             <div className="flex items-center gap-3 mt-1 opacity-60"><span className="text-sm font-black tabular-nums">{nextStop.distance}</span><div className="w-1 h-1 bg-zinc-700 rounded-full" /><span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span></div>
           </div>
-          <button onClick={openInExternalMaps} className="w-11 h-11 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0"><ArrowUpRight className="w-5 h-5" /></button>
+          <button onClick={openInExternalMaps} className="w-11 h-11 rounded-xl bg-[#FFC107]/10 border border-[#FFC107]/20 flex items-center justify-center text-[#FFC107] hover:bg-[#FFC107] hover:text-black transition-all pointer-events-auto shrink-0"><ArrowUpRight className="w-5 h-5" /></button>
         </div>
         <AnimatePresence>
           {isBladeExpanded && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6 overflow-y-auto no-scrollbar pb-10">
               {nextStop.photo && <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center"><img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" loading="lazy" /></div>}
               {nextStop.transitLines.length > 0 && <div className="flex gap-2 flex-wrap">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
-              <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
+              <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-[#FFC107] shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
               <div className="flex items-center gap-2 pt-2">
-                <button onClick={updateHomeBase} className="flex-1 py-4 border border-white/5 rounded-xl flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Target className="w-3.5 h-3.5 text-onyx-purple" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
-                <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-4 border rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3.5 h-3.5 text-onyx-purple" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3.5 h-3.5 text-white" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
+                <button onClick={updateHomeBase} className="flex-1 py-4 border border-white/5 rounded-xl flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Target className="w-3.5 h-3.5 text-[#FFC107]" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
+                <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-4 border rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-[#FFC107]/40 bg-[#FFC107]/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3.5 h-3.5 text-[#FFC107]" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3.5 h-3.5 text-white" /><span className="text-[9px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
                 <button onClick={deleteHomeBase} className="w-14 h-14 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-black transition-all"><Trash2 className="w-5 h-5" /></button>
               </div>
             </motion.div>
