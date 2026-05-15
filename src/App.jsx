@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Navigation, Map as MapIcon, Compass, Target, ArrowUpRight, 
   ChevronUp, Clock, Info, Search, Heart, Shield, Activity, 
-  X, Home, Plus, CheckCircle2
+  X, Home, Plus, CheckCircle2, Zap
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -31,12 +31,11 @@ export default function App() {
   const [activeFilter, setActiveFilter] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState(null);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
     return saved ? JSON.parse(saved) : { lat: 35.3389, lng: 139.4894, name: "FUJISAWA_STATION" };
   });
-  
-  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   
   const [nextStop, setNextStop] = useState({
     name: "SHIBUYA_STATION",
@@ -54,7 +53,6 @@ export default function App() {
   }, [homeBase]);
 
   useEffect(() => {
-    // Load Google Maps Script with Places Library
     if (!window.google) {
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&callback=initMap`;
@@ -69,11 +67,9 @@ export default function App() {
     let markers = [];
     let emergencyMarkers = [];
     let currentRoute = null;
-    let veinLine = null;
     let selectedNodes = [];
 
     function syncMarkers(gMap) {
-      console.log("%cONYX SYSTEM: Syncing Lattice Nodes...", "color: #C084FC; font-weight: bold;");
       markers.forEach(m => m.setMap(null));
       emergencyMarkers.forEach(m => m.setMap(null));
       markers = [];
@@ -86,9 +82,6 @@ export default function App() {
       const geocoder = new window.google.maps.Geocoder();
       const directionsService = new window.google.maps.DirectionsService();
 
-      console.log(`ONYX SYSTEM: Found ${savedLocations.length} locations in storage.`);
-
-      // Render Emergency Nodes
       EMERGENCY_NODES.forEach(node => {
         if (activeFilter === "All" || activeFilter === "Emergency") {
           const marker = new window.google.maps.Marker({
@@ -96,12 +89,12 @@ export default function App() {
             map: gMap,
             title: node.city,
             icon: {
-              path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              path: window.google.maps.SymbolPath.CIRCLE,
               fillColor: '#EF4444',
-              fillOpacity: 1,
+              fillOpacity: 0.8,
               strokeColor: '#FFFFFF',
               strokeWeight: 1,
-              scale: 4,
+              scale: 3,
             }
           });
           marker.addListener('click', () => handleNodeSelection(gMap, directionsService, { lat: node.lat, lng: node.lng }, node, marker));
@@ -109,7 +102,6 @@ export default function App() {
         }
       });
 
-      // Render Itinerary Nodes
       savedLocations.forEach((loc) => {
         if (activeFilter === "All" || activeFilter === loc.category) {
           if (loc.lat && loc.lng) {
@@ -206,7 +198,6 @@ export default function App() {
     function renderOnyxRoute(gMap, result, locData, destination, origin) {
       const route = result.routes[0].legs[0];
       
-      // City Vein: Base Layer
       currentRoute = new window.google.maps.Polyline({
         path: result.routes[0].overview_path,
         geodesic: true,
@@ -216,7 +207,6 @@ export default function App() {
         map: gMap
       });
 
-      // City Vein: Pulse Layer
       const pulseLine = new window.google.maps.Polyline({
         path: result.routes[0].overview_path,
         geodesic: true,
@@ -232,7 +222,7 @@ export default function App() {
             strokeColor: '#FFFFFF'
           },
           offset: '0%',
-          repeat: '100px'
+          repeat: '80px'
         }],
         map: gMap
       });
@@ -245,7 +235,7 @@ export default function App() {
           icons[0].offset = (count / 2) + 'px';
           pulseLine.set('icons', icons);
         }
-      }, 20);
+      }, 25);
 
       const oldSetMap = currentRoute.setMap;
       currentRoute.setMap = function(map) {
@@ -327,16 +317,7 @@ export default function App() {
     if (!selectedLocation) return;
     const current = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
     if (current.find(l => l.city === selectedLocation.city)) return;
-    
-    const updated = [...current, { 
-      city: selectedLocation.city, 
-      kanji: "", 
-      category: selectedLocation.category || "Urban", 
-      budget: 0, 
-      priority: 5, 
-      description: selectedLocation.description 
-    }];
-    
+    const updated = [...current, { city: selectedLocation.city, kanji: "", category: selectedLocation.category || "Urban", budget: 0, priority: 5, description: selectedLocation.description }];
     localStorage.setItem('onyx_itinerary_locations', JSON.stringify(updated));
     window.dispatchEvent(new Event('storage'));
     setItinerary(updated);
@@ -344,11 +325,7 @@ export default function App() {
 
   const updateHomeBase = () => {
     if (!selectedLocation) return;
-    setHomeBase({ 
-      lat: selectedLocation.pos.lat(), 
-      lng: selectedLocation.pos.lng(), 
-      name: selectedLocation.city.toUpperCase().replace(/\s+/g, '_') 
-    });
+    setHomeBase({ lat: selectedLocation.pos.lat(), lng: selectedLocation.pos.lng(), name: selectedLocation.city.toUpperCase().replace(/\s+/g, '_') });
   };
 
   const isLocationInLattice = selectedLocation && itinerary.find(l => l.city === selectedLocation.city);
@@ -356,77 +333,50 @@ export default function App() {
   return (
     <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden">
 
-      {/* Top Intelligence Overlays */}
-      <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-4">
+      {/* Top HUD Overlays */}
+      <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
         
-        {/* Modular Header Lattice */}
-        <div className="flex justify-between items-start gap-4">
-          <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-2xl flex flex-col pointer-events-auto shadow-2xl">
-            <span className="text-[8px] font-bold text-onyx-purple uppercase tracking-[0.4em] mb-0.5">Waypoint</span>
-            <div className="flex items-center gap-2">
-              <Home className="w-2.5 h-2.5 text-onyx-purple" />
-              <span className="text-[10px] font-mono font-bold tracking-tighter opacity-80">{homeBase.name}</span>
+        <div className="flex justify-between items-start gap-3">
+          <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl">
+            <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5 opacity-60">Waypoint</span>
+            <div className="flex items-center gap-1.5">
+              <Home className="w-2 h-2 text-onyx-purple" />
+              <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase">{homeBase.name}</span>
             </div>
           </div>
 
-          {/* Modular Search Island */}
           <motion.div 
             animate={{ 
-              width: isSearchExpanded ? "calc(100vw - 32px)" : "44px",
+              width: isSearchExpanded ? "calc(100vw - 32px)" : "40px",
               flex: isSearchExpanded ? "1 1 0%" : "0 0 auto"
             }}
-            className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center overflow-hidden pointer-events-auto shadow-2xl transition-all"
+            className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl transition-all"
           >
-            <button 
-              onClick={() => setIsSearchExpanded(!isSearchExpanded)}
-              className="w-11 h-11 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 transition-colors"
-            >
-              <Search className="w-4 h-4" />
+            <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5">
+              <Search className="w-3.5 h-3.5" />
             </button>
-            <input 
-              ref={searchInputRef}
-              type="text" 
-              placeholder="SEARCH GLOBAL GRID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={cn(
-                "flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-700 transition-opacity duration-300",
-                isSearchExpanded ? "opacity-100" : "opacity-0 pointer-events-none"
-              )}
-            />
+            <input ref={searchInputRef} type="text" placeholder="SEARCH GRID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className={cn("flex-1 bg-transparent border-none focus:ring-0 text-[10px] font-bold tracking-widest p-0 pr-4 placeholder:text-zinc-800 transition-opacity", isSearchExpanded ? "opacity-100" : "opacity-0 pointer-events-none")} />
           </motion.div>
 
-          <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-2xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[44px]">
-            <Compass className="w-3 h-3 text-onyx-purple" />
-            <span className="text-sm font-black tabular-nums tracking-tighter">
+          <div className="bg-black/80 backdrop-blur-xl border border-white/10 px-3 rounded-xl flex items-center gap-2 pointer-events-auto shadow-2xl h-[40px]">
+            <span className="text-xs font-black tabular-nums tracking-tighter opacity-80">
               {new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}
             </span>
           </div>
         </div>
 
-        {/* Category Filter Bridge */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar pointer-events-auto">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar pointer-events-auto">
           {CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveFilter(cat)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all whitespace-nowrap",
-                activeFilter === cat 
-                  ? "bg-onyx-purple border-onyx-purple text-black" 
-                  : "bg-black/40 border-white/5 text-onyx-muted hover:border-white/10"
-              )}
-            >
+            <button key={cat} onClick={() => setActiveFilter(cat)} className={cn("px-2.5 py-1 rounded-md text-[7px] font-black uppercase tracking-widest border transition-all whitespace-nowrap", activeFilter === cat ? "bg-onyx-purple border-onyx-purple text-black" : "bg-black/60 border-white/5 text-onyx-muted")}>
               {cat}
             </button>
           ))}
         </div>
       </div>
 
-      {/* The Obsidian Map Viewport */}
       <div ref={mapRef} className="flex-1 w-full bg-black" />
 
-      {/* Navigation Blade (Bottom Sheet) */}
+      {/* Stealth Navigation HUD (Bottom Sheet) */}
       <motion.div 
         drag="y"
         dragConstraints={{ top: 0, bottom: 0 }}
@@ -435,86 +385,48 @@ export default function App() {
           if (info.offset.y > 50) setIsBladeExpanded(false);
           if (info.offset.y < -50) setIsBladeExpanded(true);
         }}
-        animate={{ 
-          height: isBladeExpanded ? "60%" : "100px",
-          y: 0 
-        }}
-        transition={{ type: "spring", damping: 25, stiffness: 200 }}
-        className="bg-zinc-950 border-t border-white/10 rounded-t-[32px] p-5 pt-8 relative z-30 shadow-[0_-20px_60px_rgba(0,0,0,0.9)] touch-none"
+        animate={{ height: isBladeExpanded ? "50%" : "84px", y: 0 }}
+        transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        className="bg-black/95 backdrop-blur-2xl border-t border-white/10 rounded-t-[24px] p-5 pt-7 relative z-30 shadow-[0_-20px_60px_rgba(0,0,0,1)] touch-none"
       >
-        {/* Handle Bar */}
-        <div 
-          onClick={() => setIsBladeExpanded(!isBladeExpanded)}
-          className="absolute top-3 left-1/2 -translate-x-1/2 w-10 h-1 bg-white/10 rounded-full cursor-pointer hover:bg-onyx-purple/40 transition-colors" 
-        />
+        <div onClick={() => setIsBladeExpanded(!isBladeExpanded)} className="absolute top-2.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-white/10 rounded-full cursor-pointer hover:bg-onyx-purple/40" />
 
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between">
           <div className="flex flex-col">
-            <span className="text-[9px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5">Target Node</span>
-            <h2 className="text-xl font-black tracking-tight uppercase leading-none">{nextStop.name.replace(/_/g, ' ')}</h2>
+            <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5">Target Node</span>
+            <h2 className="text-lg font-black tracking-tight uppercase leading-tight">{nextStop.name.replace(/_/g, ' ')}</h2>
+            <div className="flex items-center gap-3 mt-1 opacity-60">
+              <span className="text-sm font-black tabular-nums">{nextStop.distance}</span>
+              <div className="w-1 h-1 bg-zinc-700 rounded-full" />
+              <span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span>
+            </div>
           </div>
-          <div className="flex flex-col items-end">
-            <span className="text-lg font-black text-white tabular-nums">{nextStop.distance}</span>
-            <span className="text-[9px] font-bold text-onyx-muted uppercase tracking-widest">{nextStop.eta}</span>
-          </div>
+          <button className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto">
+            <ArrowUpRight className="w-5 h-5" />
+          </button>
         </div>
 
         <AnimatePresence>
           {isBladeExpanded && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="mt-6 flex flex-col gap-5"
-            >
-              {/* Step Info */}
-              <div className="p-4 bg-white/5 border border-white/5 rounded-2xl flex items-start gap-4">
-                <div className="w-8 h-8 rounded-lg bg-onyx-purple/10 flex items-center justify-center shrink-0">
-                  <Navigation className="w-4 h-4 text-onyx-purple" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[8px] font-bold text-onyx-muted uppercase tracking-widest mb-0.5">MANEUVER</span>
-                  <p className="text-base font-bold leading-tight">{nextStop.step}</p>
-                </div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6">
+              <div className="flex items-start gap-3 opacity-90">
+                <Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" />
+                <p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p>
               </div>
 
-              {/* Action Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <button 
-                  onClick={updateHomeBase}
-                  className="p-4 border border-white/10 rounded-2xl flex flex-col items-start gap-2 hover:bg-white/5 transition-all active:scale-95"
-                >
+              <div className="flex items-center gap-2 pt-2">
+                <button onClick={updateHomeBase} className="flex-1 py-3 border border-white/5 rounded-lg flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all">
                   <Home className="w-3 h-3 text-onyx-purple" />
-                  <span className="text-[9px] font-black uppercase tracking-widest">Set Home</span>
+                  <span className="text-[8px] font-black uppercase tracking-[0.2em]">Set Home</span>
                 </button>
-
-                <button 
-                  onClick={addToLattice}
-                  disabled={isLocationInLattice}
-                  className={cn(
-                    "p-4 border rounded-2xl flex flex-col items-start gap-2 transition-all active:scale-95",
-                    isLocationInLattice 
-                      ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" 
-                      : "border-white/10 hover:bg-white/5"
-                  )}
-                >
+                <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-3 border rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>
                   {isLocationInLattice ? (
-                    <>
-                      <CheckCircle2 className="w-3 h-3 text-onyx-purple" />
-                      <span className="text-[9px] font-black uppercase tracking-widest">In Lattice</span>
-                    </>
+                    <><CheckCircle2 className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">In Lattice</span></>
                   ) : (
-                    <>
-                      <Plus className="w-3 h-3 text-white" />
-                      <span className="text-[9px] font-black uppercase tracking-widest">Add Lattice</span>
-                    </>
+                    <><Plus className="w-3 h-3 text-white" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>
                   )}
                 </button>
               </div>
-
-              <button className="w-full py-4 bg-onyx-purple rounded-2xl flex items-center justify-center gap-2 font-black uppercase tracking-widest text-black hover:bg-white transition-colors">
-                External Link <ArrowUpRight className="w-4 h-4" />
-              </button>
             </motion.div>
           )}
         </AnimatePresence>
