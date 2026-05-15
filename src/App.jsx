@@ -45,11 +45,9 @@ export default function App() {
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   
-  // Force Fujisawa Station as the Main Home Base
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
     const parsed = saved ? JSON.parse(saved) : null;
-    // If no saved home or it's not our station, force the exact Fujisawa coords
     return (parsed && parsed.name === ONYX_HOME_BASE.name) ? parsed : ONYX_HOME_BASE;
   });
   
@@ -127,7 +125,6 @@ export default function App() {
       });
       mapInstance.current = gMap;
       
-      // Create Persistent Home Marker
       homeMarkerRef.current = new window.google.maps.Marker({
         position: ONYX_HOME_BASE,
         map: gMap,
@@ -143,7 +140,8 @@ export default function App() {
         zIndex: 999
       });
       homeMarkerRef.current.addListener('click', () => {
-        handleNodeSelection(gMap, ONYX_HOME_BASE, { city: "FUJISAWA STATION", description: "Home Base", category: "Transit" }, homeMarkerRef.current);
+        const latLng = new window.google.maps.LatLng(ONYX_HOME_BASE.lat, ONYX_HOME_BASE.lng);
+        handleNodeSelection(gMap, latLng, { city: "FUJISAWA STATION", description: "Home Base", category: "Transit" }, homeMarkerRef.current);
       });
 
       syncMarkers(gMap);
@@ -229,7 +227,10 @@ export default function App() {
             scale: 3,
           }
         });
-        marker.addListener('click', () => handleNodeSelection(gMap, { lat: node.lat, lng: node.lng }, node, marker));
+        marker.addListener('click', () => {
+          const latLng = new window.google.maps.LatLng(node.lat, node.lng);
+          handleNodeSelection(gMap, latLng, node, marker);
+        });
         emergencyMarkersRef.current.push(marker);
       }
     });
@@ -237,7 +238,7 @@ export default function App() {
     itinerary.forEach((loc) => {
       if (activeFilter === "All" || activeFilter === loc.category) {
         if (loc.lat && loc.lng) {
-          createMarker(gMap, { lat: loc.lat, lng: loc.lng }, loc);
+          createMarker(gMap, new window.google.maps.LatLng(loc.lat, loc.lng), loc);
         } else {
           geocoder.geocode({ address: `${loc.city}, Japan` }, (results, status) => {
             if (status === 'OK') {
@@ -267,6 +268,7 @@ export default function App() {
   }
 
   function handleNodeSelection(gMap, pos, loc, marker) {
+    if (!pos) return;
     setSelectedLocation({ ...loc, pos });
     
     selectedNodesRef.current.forEach(n => n.marker && n.marker.setIcon({
@@ -297,48 +299,45 @@ export default function App() {
   }
 
   function calculateRoute(gMap, origin, destination, locData) {
-    let dist = 1000; 
-    if (window.google && window.google.maps && window.google.maps.geometry) {
-      dist = window.google.maps.geometry.spherical.computeDistanceBetween(
-        new window.google.maps.LatLng(origin.lat, origin.lng),
-        destination
-      );
-    }
+    if (!window.google?.maps?.geometry) return;
 
-    if (dist < 10) {
+    const originLatLng = new window.google.maps.LatLng(origin.lat, origin.lng);
+    const destLatLng = (destination instanceof window.google.maps.LatLng) ? destination : new window.google.maps.LatLng(destination.lat, destination.lng);
+
+    const dist = window.google.maps.geometry.spherical.computeDistanceBetween(originLatLng, destLatLng);
+
+    if (dist < 15) {
       setNextStop({
         name: (locData.city || locData.name || "HOME").toUpperCase(),
         distance: "0M",
         eta: "ARRIVED",
         step: "You are currently at the Main Home Base.",
-        rating: locData.rating,
-        photo: locData.photo,
+        rating: locData.rating || null,
+        photo: locData.photo || null,
         transitLines: []
       });
       setIsBladeExpanded(true);
-      gMap.panTo(destination);
+      gMap.panTo(destLatLng);
       return;
     }
 
     const service = new window.google.maps.DirectionsService();
     service.route({
-      origin: origin,
-      destination: destination,
+      origin: originLatLng,
+      destination: destLatLng,
       travelMode: window.google.maps.TravelMode.TRANSIT,
       transitOptions: { departureTime: new Date() }
     }, (result, status) => {
       if (status === 'OK') {
-        renderOnyxRoute(gMap, result, locData, destination, origin);
+        renderOnyxRoute(gMap, result, locData, destLatLng, originLatLng);
       } else {
         service.route({
-          origin: origin,
-          destination: destination,
+          origin: originLatLng,
+          destination: destLatLng,
           travelMode: window.google.maps.TravelMode.WALKING
         }, (walkResult, walkStatus) => {
           if (walkStatus === 'OK') {
-            renderOnyxRoute(gMap, walkResult, locData, destination, origin);
-          } else {
-            console.error("ONYX SYSTEM: Route calculation failed", walkStatus);
+            renderOnyxRoute(gMap, walkResult, locData, destLatLng, originLatLng);
           }
         });
       }
@@ -396,8 +395,8 @@ export default function App() {
       distance: route.distance.text,
       eta: route.duration.text,
       step: route.steps[0].instructions.replace(/<[^>]*>?/gm, ''),
-      rating: locData.rating,
-      photo: locData.photo,
+      rating: locData.rating || null,
+      photo: locData.photo || null,
       transitLines: transitLines
     });
     setIsBladeExpanded(true);
@@ -423,7 +422,7 @@ export default function App() {
 
   const openInExternalMaps = () => {
     if (!selectedLocation) return;
-    const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${selectedLocation.pos.lat()},${selectedLocation.pos.lng()}&travelmode=transit`;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${selectedLocation.pos.lat?.() || selectedLocation.pos.lat},${selectedLocation.pos.lng?.() || selectedLocation.pos.lng}&travelmode=transit`;
     window.open(url, '_blank');
   };
 
@@ -438,7 +437,9 @@ export default function App() {
 
   const resetHomeBase = () => {
     setHomeBase(ONYX_HOME_BASE);
-    mapInstance.current?.panTo(ONYX_HOME_BASE);
+    const latLng = new window.google.maps.LatLng(ONYX_HOME_BASE.lat, ONYX_HOME_BASE.lng);
+    handleNodeSelection(mapInstance.current, latLng, { city: "FUJISAWA STATION", description: "Home Base", category: "Transit" }, homeMarkerRef.current);
+    mapInstance.current?.panTo(latLng);
     mapInstance.current?.setZoom(15);
   };
 
@@ -507,7 +508,7 @@ export default function App() {
               {nextStop.transitLines.length > 0 && <div className="flex gap-2">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
               <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
               <div className="flex items-center gap-2 pt-2">
-                <button onClick={() => { setHomeBase(ONYX_HOME_BASE); mapInstance.current?.panTo(ONYX_HOME_BASE); }} className="flex-1 py-3 border border-onyx-purple/30 bg-onyx-purple/5 rounded-lg flex items-center justify-center gap-2 hover:bg-onyx-purple/10 active:scale-95 transition-all"><Target className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Reset Home</span></button>
+                <button onClick={resetHomeBase} className="flex-1 py-3 border border-onyx-purple/30 bg-onyx-purple/5 rounded-lg flex items-center justify-center gap-2 hover:bg-onyx-purple/10 active:scale-95 transition-all"><Target className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Reset Home</span></button>
                 <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-3 border rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3 h-3 text-white" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
               </div>
             </motion.div>
