@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Navigation, Compass, Search, X, Home, Plus, CheckCircle2, Zap, ArrowUpRight,
@@ -13,8 +13,6 @@ function cn(...inputs) {
 }
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-// ABSOLUTE JR FUJISAWA STATION COORDINATES (Verified via Google Maps URL params)
 const ONYX_STATION_COORDS = { lat: 35.3389164, lng: 139.4874922, name: "FUJISAWA STATION" };
 
 const EMERGENCY_NODES = [
@@ -35,8 +33,9 @@ export default function App() {
   const currentRouteRef = useRef(null);
   const pulseLineRef = useRef(null);
   const selectedNodesRef = useRef([]);
-  const animationIntervalRef = useRef(null);
+  const animationFrameRef = useRef(null);
   const homeMarkerRef = useRef(null);
+  const pollIntervalRef = useRef(null);
 
   const [isBladeExpanded, setIsBladeExpanded] = useState(false);
   const [activeFilter, setActiveFilter] = useState("All");
@@ -65,18 +64,17 @@ export default function App() {
     return JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
   });
 
-  const log = (msg) => {
+  const log = useCallback((msg) => {
     console.log(`[ONYX] ${msg}`);
     setSystemLog(msg.toUpperCase());
-  };
+  }, []);
 
+  // Sync Home Base with Storage
   useEffect(() => {
     if (homeBase) {
       localStorage.setItem('onyx_waypoint_home', JSON.stringify(homeBase));
-      log(`HOME BASE SET: ${homeBase.name}`);
     } else {
       localStorage.removeItem('onyx_waypoint_home');
-      log("HOME BASE CLEARED");
     }
     
     if (homeMarkerRef.current && homeBase) {
@@ -88,24 +86,55 @@ export default function App() {
     }
   }, [homeBase]);
 
+  // Sync Markers with Filter/Itinerary
   useEffect(() => {
     if (mapInstance.current) syncMarkers(mapInstance.current);
   }, [activeFilter, itinerary]);
 
+  // Traffic Layer Toggle
   useEffect(() => {
     if (mapInstance.current) {
       if (showTraffic) {
         if (!trafficLayerRef.current) trafficLayerRef.current = new window.google.maps.TrafficLayer();
         trafficLayerRef.current.setMap(mapInstance.current);
-        log("TRAFFIC LAYER ACTIVE");
       } else if (trafficLayerRef.current) {
         trafficLayerRef.current.setMap(null);
-        log("TRAFFIC LAYER INACTIVE");
       }
     }
   }, [showTraffic]);
 
+  // Core Initialization & Lifecycle
   useEffect(() => {
+    const startPolling = () => {
+      if (pollIntervalRef.current) return;
+      pollIntervalRef.current = setInterval(() => {
+        const currentData = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
+        if (JSON.stringify(currentData) !== JSON.stringify(itinerary)) {
+          setItinerary(currentData);
+        }
+      }, 3000);
+    };
+
+    const stopPolling = () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      } else {
+        startPolling();
+        if (pulseLineRef.current) startRouteAnimation();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    startPolling();
+
     if (!window.google) {
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,geometry&callback=initMap`;
@@ -113,37 +142,47 @@ export default function App() {
       script.defer = true;
       window.initMap = initMap;
       document.head.appendChild(script);
-      log("LOADING GOOGLE CORE...");
     } else {
       initMap();
     }
 
-    const pollInterval = setInterval(() => {
-      const currentData = JSON.parse(localStorage.getItem('onyx_itinerary_locations') || '[]');
-      if (JSON.stringify(currentData) !== JSON.stringify(itinerary)) {
-        setItinerary(currentData);
-        log("LATTICE SYNC COMPLETE");
-      }
-    }, 3000);
-
     return () => {
-      clearInterval(pollInterval);
-      if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopPolling();
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, []);
+  }, [itinerary]);
 
-  function initMap() {
+  const startRouteAnimation = () => {
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    let count = 0;
+    const animate = () => {
+      count = (count + 0.5) % 200;
+      const icons = pulseLineRef.current?.get('icons');
+      if (icons && icons[0]) {
+        icons[0].offset = count + 'px';
+        pulseLineRef.current.set('icons', icons);
+      }
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+    animationFrameRef.current = requestAnimationFrame(animate);
+  };
+
+  const initMap = useCallback(() => {
     if (mapInstance.current) return;
     try {
       const centerPos = homeBase || ONYX_STATION_COORDS;
       const gMap = new window.google.maps.Map(mapRef.current, {
         center: centerPos,
-        zoom: 17, // Tighter initial zoom
+        zoom: 17,
         styles: obsidianStyle,
         disableDefaultUI: true,
         backgroundColor: '#000000',
         clickableIcons: true,
-        gestureHandling: "greedy"
+        gestureHandling: "greedy",
+        // OPTIMIZATION: Reduce tilt and rotation tracking for battery
+        tilt: 0,
+        rotateControl: false
       });
       mapInstance.current = gMap;
       
@@ -165,7 +204,6 @@ export default function App() {
 
       homeMarkerRef.current.addListener('click', () => {
         if (!homeBase) return;
-        log(`SELECTED HOME BASE: ${homeBase.name}`);
         const latLng = new window.google.maps.LatLng(homeBase.lat, homeBase.lng);
         handleNodeSelection(gMap, latLng, { city: homeBase.name || "HOME BASE", description: "Pinned Control Point", category: "Home" }, homeMarkerRef.current);
       });
@@ -180,26 +218,20 @@ export default function App() {
       autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace();
         if (!place.geometry || !place.geometry.location) return;
-        log(`SEARCH HIT: ${place.name}`);
         setIsSearchExpanded(false);
         fetchRichData(gMap, place.place_id, place.geometry.location, { city: place.name, description: place.formatted_address, category: "Urban" });
       });
 
       gMap.addListener('click', (e) => {
-        log(`MAP CLICK AT: ${e.latLng.lat().toFixed(4)}, ${e.latLng.lng().toFixed(4)}`);
         if (e.placeId) {
-          log(`INTERCEPTED PLACE ID: ${e.placeId}`);
           e.stop();
           fetchRichData(gMap, e.placeId, e.latLng, null);
         } else {
-          log("SCANNING FOR NEARBY POI...");
           const service = new window.google.maps.places.PlacesService(gMap);
           service.nearbySearch({ location: e.latLng, radius: 40, type: ['point_of_interest'] }, (results, status) => {
             if (status === 'OK' && results[0]) {
-              log(`SNAPPING TO POI: ${results[0].name}`);
               fetchRichData(gMap, results[0].place_id, results[0].geometry.location, null);
             } else {
-              log("REVERSE GEOCODING LOCATION...");
               const geocoder = new window.google.maps.Geocoder();
               geocoder.geocode({ location: e.latLng }, (results, status) => {
                 if (status === 'OK' && results[0]) {
@@ -215,35 +247,30 @@ export default function App() {
     } catch (err) {
       log(`MAP ERROR: ${err.message}`);
     }
-  }
+  }, [homeBase, log]);
 
-  function fetchRichData(gMap, placeId, pos, basicData) {
-    log(`FETCHING RICH DATA FOR ID: ${placeId}`);
+  const fetchRichData = useCallback((gMap, placeId, pos, basicData) => {
     const service = new window.google.maps.places.PlacesService(gMap);
     service.getDetails({ 
       placeId: placeId,
       fields: ["name", "rating", "photos", "formatted_address", "types", "geometry"]
     }, (place, status) => {
       if (status === 'OK' && place) {
-        log(`DATA RETRIEVED: ${place.name}`);
         const loc = { 
           city: place.name, 
           description: place.formatted_address, 
           category: place.types?.[0]?.replace(/_/g, ' ').toUpperCase() || "POI",
           rating: place.rating, 
-          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 1000 }) : null 
+          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 800 }) : null 
         };
         handleNodeSelection(gMap, place.geometry.location, loc, null);
-      } else {
-        log(`RICH DATA FAIL: ${status}`);
-        if (basicData || pos) {
-          handleNodeSelection(gMap, pos, basicData || { city: "POINT", description: "Unknown Location", category: "Map" }, null);
-        }
+      } else if (basicData || pos) {
+        handleNodeSelection(gMap, pos, basicData || { city: "POINT", description: "Unknown Location", category: "Map" }, null);
       }
     });
-  }
+  }, []);
 
-  function syncMarkers(gMap) {
+  const syncMarkers = useCallback((gMap) => {
     markersRef.current.forEach(m => m.setMap(null));
     emergencyMarkersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
@@ -263,10 +290,11 @@ export default function App() {
             strokeColor: '#FFFFFF',
             strokeWeight: 1,
             scale: 4,
-          }
+          },
+          // OPTIMIZATION: Use optimized markers for mobile
+          optimized: true
         });
         marker.addListener('click', () => {
-          log(`SELECTED EMERGENCY: ${node.city}`);
           const latLng = new window.google.maps.LatLng(node.lat, node.lng);
           handleNodeSelection(gMap, latLng, node, marker);
         });
@@ -287,9 +315,9 @@ export default function App() {
         }
       }
     });
-  }
+  }, [activeFilter, itinerary]);
 
-  function createMarker(gMap, pos, loc) {
+  const createMarker = useCallback((gMap, pos, loc) => {
     const marker = new window.google.maps.Marker({
       position: pos,
       map: gMap,
@@ -300,16 +328,14 @@ export default function App() {
         strokeColor: '#FFFFFF',
         strokeWeight: 1.5,
         scale: 6,
-      }
+      },
+      optimized: true
     });
-    marker.addListener('click', () => {
-      log(`SELECTED LATTICE NODE: ${loc.city}`);
-      handleNodeSelection(gMap, pos, loc, marker);
-    });
+    marker.addListener('click', () => handleNodeSelection(gMap, pos, loc, marker));
     markersRef.current.push(marker);
-  }
+  }, []);
 
-  function handleNodeSelection(gMap, pos, loc, marker) {
+  const handleNodeSelection = useCallback((gMap, pos, loc, marker) => {
     if (!pos) return;
     setSelectedLocation({ ...loc, pos });
     
@@ -351,9 +377,9 @@ export default function App() {
       });
       setIsBladeExpanded(true);
     }
-  }
+  }, [homeBase]);
 
-  function calculateRoute(gMap, origin, destination, locData) {
+  const calculateRoute = useCallback((gMap, origin, destination, locData) => {
     if (!window.google?.maps?.geometry) return;
 
     const originLatLng = new window.google.maps.LatLng(origin.lat, origin.lng);
@@ -376,7 +402,6 @@ export default function App() {
       return;
     }
 
-    log(`CALCULATING TRANSIT FROM HOME TO ${locData.city}...`);
     const service = new window.google.maps.DirectionsService();
     service.route({
       origin: originLatLng,
@@ -385,30 +410,25 @@ export default function App() {
       transitOptions: { departureTime: new Date() }
     }, (result, status) => {
       if (status === 'OK') {
-        log("TRANSIT ROUTE OPTIMIZED");
         renderOnyxRoute(gMap, result, locData, destLatLng, originLatLng);
       } else {
-        log(`TRANSIT FAIL (${status}). SWITCHING TO KINETIC...`);
         service.route({
           origin: originLatLng,
           destination: destLatLng,
           travelMode: window.google.maps.TravelMode.WALKING
         }, (walkResult, walkStatus) => {
           if (walkStatus === 'OK') {
-            log("KINETIC ROUTE OPTIMIZED");
             renderOnyxRoute(gMap, walkResult, locData, destLatLng, originLatLng);
-          } else {
-            log(`ROUTE FAILED: ${walkStatus}`);
           }
         });
       }
     });
-  }
+  }, []);
 
-  function renderOnyxRoute(gMap, result, locData, destination, origin) {
+  const renderOnyxRoute = useCallback((gMap, result, locData, destination, origin) => {
     if (currentRouteRef.current) currentRouteRef.current.setMap(null);
     if (pulseLineRef.current) pulseLineRef.current.setMap(null);
-    if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
 
     const route = result.routes[0].legs[0];
     const transitLines = route.steps
@@ -441,15 +461,7 @@ export default function App() {
       map: gMap
     });
 
-    let count = 0;
-    animationIntervalRef.current = setInterval(() => {
-      count = (count + 1) % 200;
-      const icons = pulseLineRef.current?.get('icons');
-      if (icons && icons[0]) {
-        icons[0].offset = (count / 2) + 'px';
-        pulseLineRef.current.set('icons', icons);
-      }
-    }, 25);
+    startRouteAnimation();
 
     setNextStop({
       name: (locData.city || locData.name || "TARGET").toUpperCase(),
@@ -466,27 +478,27 @@ export default function App() {
     bounds.extend(origin);
     bounds.extend(destination);
     gMap.fitBounds(bounds, { top: 150, bottom: 250, left: 50, right: 50 });
-  }
+  }, []);
 
-  const locateUser = () => {
+  const locateUser = useCallback(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
-        log("GEOLOCATING DEVICE...");
         const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         mapInstance.current?.panTo(coords);
         mapInstance.current?.setZoom(17);
       });
     }
-  };
+  }, []);
 
   const zoomIn = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() + 1);
   const zoomOut = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() - 1);
 
   const openInExternalMaps = () => {
     if (!selectedLocation || !homeBase) return;
-    const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${selectedLocation.pos.lat?.() || selectedLocation.pos.lat},${selectedLocation.pos.lng?.() || selectedLocation.pos.lng}&travelmode=transit`;
+    const lat = selectedLocation.pos.lat?.() || selectedLocation.pos.lat;
+    const lng = selectedLocation.pos.lng?.() || selectedLocation.pos.lng;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${homeBase.lat},${homeBase.lng}&destination=${lat},${lng}&travelmode=transit`;
     window.open(url, '_blank');
-    log("HANDING OFF TO GOOGLE MAPS NATIVE");
   };
 
   const addToLattice = () => {
@@ -496,7 +508,6 @@ export default function App() {
     const updated = [...current, { city: selectedLocation.city, kanji: "", category: selectedLocation.category || "Urban", budget: 0, priority: 5, description: selectedLocation.description }];
     localStorage.setItem('onyx_itinerary_locations', JSON.stringify(updated));
     setItinerary(updated);
-    log(`NODE ADDED TO LATTICE: ${selectedLocation.city}`);
   };
 
   const updateHomeBase = () => {
@@ -507,16 +518,11 @@ export default function App() {
       name: selectedLocation.city.toUpperCase() 
     };
     setHomeBase(newHome);
-    log(`NEW HOME BASE PINNED: ${newHome.name}`);
   };
 
-  const deleteHomeBase = () => {
-    setHomeBase(null);
-    log("HOME BASE DELETED");
-  };
+  const deleteHomeBase = () => setHomeBase(null);
 
   const resetToFujisawa = () => {
-    log("RESETTING TO FUJISAWA STATION...");
     setHomeBase(ONYX_STATION_COORDS);
     const latLng = new window.google.maps.LatLng(ONYX_STATION_COORDS.lat, ONYX_STATION_COORDS.lng);
     mapInstance.current?.panTo(latLng);
@@ -524,12 +530,10 @@ export default function App() {
     handleNodeSelection(mapInstance.current, latLng, { city: "FUJISAWA STATION", description: "Primary Home Base", category: "Transit" }, homeMarkerRef.current);
   };
 
-  const isLocationInLattice = selectedLocation && itinerary.find(l => l.city === selectedLocation.city);
+  const isLocationInLattice = useMemo(() => selectedLocation && itinerary.find(l => l.city === selectedLocation.city), [selectedLocation, itinerary]);
 
   return (
-    <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden">
-      
-      {/* ONYX SYSTEM LOG OVERLAY */}
+    <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden will-change-transform">
       <div className="fixed bottom-24 left-4 z-40 pointer-events-none">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.4 }} className="bg-black/40 backdrop-blur-md px-2 py-1 rounded border border-white/5">
           <span className="text-[6px] font-black tracking-[0.3em] uppercase animate-pulse">{systemLog}</span>
@@ -595,7 +599,7 @@ export default function App() {
         <AnimatePresence>
           {isBladeExpanded && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6 overflow-y-auto no-scrollbar pb-10">
-              {nextStop.photo && <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center"><img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" /></div>}
+              {nextStop.photo && <div className="w-full h-48 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center"><img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" loading="lazy" /></div>}
               {nextStop.transitLines.length > 0 && <div className="flex gap-2">{nextStop.transitLines.map((line, idx) => (<div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} /><span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span></div>))}</div>}
               <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
               <div className="flex items-center gap-2 pt-2">
