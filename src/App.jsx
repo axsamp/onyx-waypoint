@@ -34,11 +34,11 @@ export default function App() {
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
-    return saved ? JSON.parse(saved) : { lat: 35.3389, lng: 139.4894, name: "FUJISAWA_STATION" };
+    return saved ? JSON.parse(saved) : { lat: 35.3389, lng: 139.4894, name: "FUJISAWA STATION" };
   });
   
   const [nextStop, setNextStop] = useState({
-    name: "SHIBUYA_STATION",
+    name: "SHIBUYA STATION",
     distance: "1.2KM",
     eta: "14 MIN",
     step: "Head North towards Hachiko Square"
@@ -341,7 +341,7 @@ export default function App() {
             <span className="text-[7px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5 opacity-60">Waypoint</span>
             <div className="flex items-center gap-1.5">
               <Home className="w-2 h-2 text-onyx-purple" />
-              <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase">{homeBase.name}</span>
+              <span className="text-[9px] font-mono font-bold tracking-tighter opacity-90 uppercase">{homeBase.name?.replace(/_/g, ' ')}</span>
             </div>
           </motion.div>
 
@@ -352,7 +352,7 @@ export default function App() {
               width: isSearchExpanded ? "calc(100vw - 32px)" : "40px",
               flex: isSearchExpanded ? "1 1 0%" : "0 0 auto"
             }}
-            transition={{ type: "spring", damping: 30, stiffness: 350 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
             className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center overflow-hidden pointer-events-auto shadow-2xl"
           >
             <button onClick={() => setIsSearchExpanded(!isSearchExpanded)} className="w-10 h-10 flex items-center justify-center shrink-0 text-onyx-purple hover:bg-white/5 active:scale-90 transition-transform">
@@ -411,7 +411,7 @@ export default function App() {
         <div className="flex items-start justify-between">
           <div className="flex flex-col">
             <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5">Target Node</span>
-            <h2 className="text-lg font-black tracking-tight uppercase leading-tight">{nextStop.name.replace(/_/g, ' ')}</h2>
+            <h2 className="text-lg font-black tracking-tight uppercase leading-tight">{nextStop.name?.replace(/_/g, ' ')}</h2>
             <div className="flex items-center gap-3 mt-1 opacity-60">
               <span className="text-sm font-black tabular-nums">{nextStop.distance}</span>
               <div className="w-1 h-1 bg-zinc-700 rounded-full" />
