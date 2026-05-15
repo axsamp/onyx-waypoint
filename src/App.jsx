@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Navigation, Compass, Search, X, Home, Plus, CheckCircle2, Zap, ArrowUpRight
+  Navigation, Compass, Search, X, Home, Plus, CheckCircle2, Zap, ArrowUpRight,
+  Maximize, Minimize, Map as MapIcon, Star, Camera, Activity, Target
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -25,6 +26,7 @@ export default function App() {
   const mapRef = useRef(null);
   const searchInputRef = useRef(null);
   const mapInstance = useRef(null);
+  const trafficLayerRef = useRef(null);
   const markersRef = useRef([]);
   const emergencyMarkersRef = useRef([]);
   const currentRouteRef = useRef(null);
@@ -37,6 +39,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [showTraffic, setShowTraffic] = useState(false);
+  
   const [homeBase, setHomeBase] = useState(() => {
     const saved = localStorage.getItem('onyx_waypoint_home');
     return saved ? JSON.parse(saved) : { lat: 35.3389, lng: 139.4894, name: "FUJISAWA STATION" };
@@ -46,7 +50,10 @@ export default function App() {
     name: "SHIBUYA STATION",
     distance: "1.2KM",
     eta: "14 MIN",
-    step: "Head North towards Hachiko Square"
+    step: "Head North towards Hachiko Square",
+    rating: null,
+    photo: null,
+    transitLines: []
   });
 
   const [itinerary, setItinerary] = useState(() => {
@@ -57,12 +64,22 @@ export default function App() {
     localStorage.setItem('onyx_waypoint_home', JSON.stringify(homeBase));
   }, [homeBase]);
 
-  // Sync markers when filter or itinerary changes
   useEffect(() => {
     if (mapInstance.current) {
       syncMarkers(mapInstance.current);
     }
   }, [activeFilter, itinerary]);
+
+  useEffect(() => {
+    if (mapInstance.current) {
+      if (showTraffic) {
+        if (!trafficLayerRef.current) trafficLayerRef.current = new window.google.maps.TrafficLayer();
+        trafficLayerRef.current.setMap(mapInstance.current);
+      } else if (trafficLayerRef.current) {
+        trafficLayerRef.current.setMap(null);
+      }
+    }
+  }, [showTraffic]);
 
   useEffect(() => {
     if (!window.google) {
@@ -99,36 +116,55 @@ export default function App() {
         disableDefaultUI: true,
         backgroundColor: '#000000',
         clickableIcons: true,
+        gestureHandling: "greedy"
       });
       mapInstance.current = gMap;
       syncMarkers(gMap);
 
       const autocomplete = new window.google.maps.places.Autocomplete(searchInputRef.current, {
         componentRestrictions: { country: "jp" },
-        fields: ["geometry", "name", "formatted_address"]
+        fields: ["geometry", "name", "formatted_address", "place_id"]
       });
 
       autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace();
         if (!place.geometry || !place.geometry.location) return;
         setIsSearchExpanded(false);
-        handleNodeSelection(gMap, place.geometry.location, { city: place.name, description: place.formatted_address, category: "Urban" }, null);
+        fetchRichData(gMap, place.place_id, place.geometry.location, { city: place.name, description: place.formatted_address, category: "Urban" });
       });
 
       gMap.addListener('click', (e) => {
         if (e.placeId) {
           e.stop();
-          const service = new window.google.maps.places.PlacesService(gMap);
-          service.getDetails({ placeId: e.placeId }, (place, status) => {
-            if (status === 'OK') {
-              handleNodeSelection(gMap, place.geometry.location, { city: place.name, description: place.formatted_address, category: "Urban" }, null);
-            }
-          });
+          fetchRichData(gMap, e.placeId, e.latLng, null);
         }
       });
     } catch (err) {
       console.error("ONYX SYSTEM: Map Initialization Error", err);
     }
+  }
+
+  function fetchRichData(gMap, placeId, pos, basicData) {
+    const service = new window.google.maps.places.PlacesService(gMap);
+    service.getDetails({ 
+      placeId: placeId,
+      fields: ["name", "rating", "photos", "formatted_address", "types", "geometry"]
+    }, (place, status) => {
+      if (status === 'OK') {
+        const loc = basicData || { 
+          city: place.name, 
+          description: place.formatted_address, 
+          category: place.types[0]?.charAt(0).toUpperCase() + place.types[0]?.slice(1) || "Point"
+        };
+        handleNodeSelection(gMap, place.geometry.location, { 
+          ...loc, 
+          rating: place.rating, 
+          photo: place.photos ? place.photos[0].getUrl({ maxWidth: 400 }) : null 
+        }, null);
+      } else if (basicData) {
+        handleNodeSelection(gMap, pos, basicData, null);
+      }
+    });
   }
 
   function syncMarkers(gMap) {
@@ -249,6 +285,14 @@ export default function App() {
 
     const route = result.routes[0].legs[0];
     
+    // Extract Transit Lines
+    const transitLines = route.steps
+      .filter(step => step.transit)
+      .map(step => ({
+        name: step.transit.line.short_name || step.transit.line.name,
+        color: step.transit.line.color || '#C084FC'
+      }));
+
     currentRouteRef.current = new window.google.maps.Polyline({
       path: result.routes[0].overview_path,
       geodesic: true,
@@ -286,7 +330,10 @@ export default function App() {
       name: (locData.city || locData.name || "TARGET").toUpperCase(),
       distance: route.distance.text,
       eta: route.duration.text,
-      step: route.steps[0].instructions.replace(/<[^>]*>?/gm, '')
+      step: route.steps[0].instructions.replace(/<[^>]*>?/gm, ''),
+      rating: locData.rating,
+      photo: locData.photo,
+      transitLines: transitLines
     });
     setIsBladeExpanded(true);
     
@@ -295,6 +342,19 @@ export default function App() {
     bounds.extend(destination);
     gMap.fitBounds(bounds, { top: 150, bottom: 250, left: 50, right: 50 });
   }
+
+  const locateUser = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        mapInstance.current?.panTo(coords);
+        mapInstance.current?.setZoom(15);
+      });
+    }
+  };
+
+  const zoomIn = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() + 1);
+  const zoomOut = () => mapInstance.current?.setZoom(mapInstance.current.getZoom() - 1);
 
   const addToLattice = () => {
     if (!selectedLocation) return;
@@ -315,6 +375,8 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] bg-black text-white flex flex-col font-['Outfit'] overflow-hidden">
+
+      {/* Top HUD Overlays */}
       <div className="fixed top-0 left-0 right-0 z-20 pointer-events-none p-4 pt-[env(safe-area-inset-top)] flex flex-col gap-3">
         <div className="flex justify-between items-start gap-3">
           <motion.div layout className="bg-black/80 backdrop-blur-xl border border-white/10 p-2.5 rounded-xl flex flex-col pointer-events-auto shadow-2xl shrink-0">
@@ -330,15 +392,8 @@ export default function App() {
               <Search className="w-3.5 h-3.5" />
             </button>
             <motion.input 
-              animate={{ 
-                opacity: isSearchExpanded ? 1 : 0,
-                x: isSearchExpanded ? 0 : -10,
-              }}
-              style={{ 
-                pointerEvents: isSearchExpanded ? "auto" : "none",
-                width: isSearchExpanded ? "100%" : "0px",
-                overflow: "hidden"
-              }}
+              animate={{ opacity: isSearchExpanded ? 1 : 0, x: isSearchExpanded ? 0 : -10 }}
+              style={{ pointerEvents: isSearchExpanded ? "auto" : "none", width: isSearchExpanded ? "100%" : "0px", overflow: "hidden" }}
               ref={searchInputRef} 
               type="text" 
               placeholder="SEARCH GRID..." 
@@ -364,13 +419,48 @@ export default function App() {
         </div>
       </div>
 
+      {/* Right Side Map Controls HUD */}
+      <div className="fixed right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 pointer-events-none">
+        <button onClick={locateUser} className="w-10 h-10 bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl flex items-center justify-center text-white pointer-events-auto hover:bg-onyx-purple hover:text-black transition-all shadow-2xl">
+          <Target className="w-4 h-4" />
+        </button>
+        <button onClick={() => setShowTraffic(!showTraffic)} className={cn("w-10 h-10 bg-black/80 backdrop-blur-xl border rounded-xl flex items-center justify-center pointer-events-auto transition-all shadow-2xl", showTraffic ? "border-onyx-purple text-onyx-purple" : "border-white/10 text-white hover:border-white/30")}>
+          <Activity className="w-4 h-4" />
+        </button>
+        <div className="flex flex-col bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl pointer-events-auto overflow-hidden shadow-2xl">
+          <button onClick={zoomIn} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 border-bottom border-white/5"><Maximize className="w-3.5 h-3.5" /></button>
+          <button onClick={zoomOut} className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10"><Minimize className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+
       <div ref={mapRef} className="flex-1 w-full bg-black" />
 
-      <motion.div drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={0.1} onDragEnd={(e, info) => { if (info.offset.y > 50) setIsBladeExpanded(false); if (info.offset.y < -50) setIsBladeExpanded(true); }} animate={{ height: isBladeExpanded ? "50%" : "84px", y: 0 }} transition={{ type: "spring", damping: 30, stiffness: 300 }} className="bg-black/95 backdrop-blur-2xl border-t border-white/10 rounded-t-[24px] p-5 pt-7 relative z-30 shadow-[0_-20px_60px_rgba(0,0,0,1)] touch-none">
+      {/* Stealth Navigation HUD (Bottom Sheet) */}
+      <motion.div 
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={0.1}
+        onDragEnd={(e, info) => {
+          if (info.offset.y > 50) setIsBladeExpanded(false);
+          if (info.offset.y < -50) setIsBladeExpanded(true);
+        }}
+        animate={{ height: isBladeExpanded ? "65%" : "84px", y: 0 }}
+        transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        className="bg-black/95 backdrop-blur-2xl border-t border-white/10 rounded-t-[24px] p-5 pt-7 relative z-30 shadow-[0_-20px_60px_rgba(0,0,0,1)] touch-none"
+      >
         <div onClick={() => setIsBladeExpanded(!isBladeExpanded)} className="absolute top-2.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-white/10 rounded-full cursor-pointer hover:bg-onyx-purple/40" />
+
         <div className="flex items-start justify-between">
-          <div className="flex flex-col">
-            <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em] mb-0.5">Target Node</span>
+          <div className="flex flex-col flex-1">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-[8px] font-black text-onyx-purple uppercase tracking-[0.4em]">Target Node</span>
+              {nextStop.rating && (
+                <div className="flex items-center gap-1 bg-onyx-purple/10 px-1.5 py-0.5 rounded-full">
+                  <Star className="w-2 h-2 text-onyx-purple fill-onyx-purple" />
+                  <span className="text-[8px] font-bold text-onyx-purple">{nextStop.rating}</span>
+                </div>
+              )}
+            </div>
             <h2 className="text-lg font-black tracking-tight uppercase leading-tight">{nextStop.name?.replace(/_/g, ' ')}</h2>
             <div className="flex items-center gap-3 mt-1 opacity-60">
               <span className="text-sm font-black tabular-nums">{nextStop.distance}</span>
@@ -378,14 +468,39 @@ export default function App() {
               <span className="text-[9px] font-bold uppercase tracking-widest">{nextStop.eta}</span>
             </div>
           </div>
-          <button className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto">
+          <button className="w-10 h-10 rounded-xl bg-onyx-purple/10 border border-onyx-purple/20 flex items-center justify-center text-onyx-purple hover:bg-onyx-purple hover:text-black transition-all pointer-events-auto shrink-0">
             <ArrowUpRight className="w-5 h-5" />
           </button>
         </div>
+
         <AnimatePresence>
           {isBladeExpanded && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6">
-              <div className="flex items-start gap-3 opacity-90"><Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" /><p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p></div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 space-y-6 overflow-y-auto no-scrollbar pb-10">
+              
+              {/* Photo Preview if available */}
+              {nextStop.photo && (
+                <div className="w-full h-32 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 flex items-center justify-center">
+                  <img src={nextStop.photo} alt="POI" className="w-full h-full object-cover opacity-60 hover:opacity-100 transition-opacity" />
+                </div>
+              )}
+
+              {/* Transit Line HUD */}
+              {nextStop.transitLines.length > 0 && (
+                <div className="flex gap-2">
+                  {nextStop.transitLines.map((line, idx) => (
+                    <div key={idx} className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">{line.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-start gap-3 opacity-90">
+                <Zap className="w-3.5 h-3.5 text-onyx-purple shrink-0 mt-0.5" />
+                <p className="text-sm font-bold leading-snug tracking-tight">{nextStop.step}</p>
+              </div>
+
               <div className="flex items-center gap-2 pt-2">
                 <button onClick={updateHomeBase} className="flex-1 py-3 border border-white/5 rounded-lg flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all"><Home className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Set Home</span></button>
                 <button onClick={addToLattice} disabled={isLocationInLattice} className={cn("flex-1 py-3 border rounded-lg flex items-center justify-center gap-2 active:scale-95 transition-all", isLocationInLattice ? "border-onyx-purple/40 bg-onyx-purple/5 opacity-80" : "border-white/5 hover:bg-white/5")}>{isLocationInLattice ? (<><CheckCircle2 className="w-3 h-3 text-onyx-purple" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">In Lattice</span></>) : (<><Plus className="w-3 h-3 text-white" /><span className="text-[8px] font-black uppercase tracking-[0.2em]">Add Lattice</span></>)}</button>
@@ -394,6 +509,7 @@ export default function App() {
           )}
         </AnimatePresence>
       </motion.div>
+
     </div>
   );
 }
